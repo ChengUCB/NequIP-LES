@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nequip-les"
+dynamic = ["version"]
+description = "NequIP-LES is an open-source extension package for augmenting NequIP with long-range interactions using LES library."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+{name = "The NequIP-LES Developers", email = "dongjin.kim@berkeley.edu"},
+]
+dependencies = [
+"nequip>=0.13.0",
+]
+
+[project.urls]
+Repository = "https://github.com/ChengUCB/NequIP-LES"
+
+[tool.setuptools]
+packages = {find = {include = ["nequip_les", "nequip_les.*"]}}
+
+[tool.setuptools.dynamic]
+version = {attr = "nequip_les._version.__version__"}
+
+[tool.ruff]
+line-length = 88
+exclude = [
+".eggs",
+"*.egg",
+"build",
+"dist",
+"docs",
+".git",
+"__pycache__",
+"examples",
+"tmp"
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "C90"]
+ignore = ["E226", "E501", "E741", "E743", "C901", "E203"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[project.entry-points."nequip.extension"]
+init_always = "nequip_les"
