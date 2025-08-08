@@ -8,7 +8,7 @@ nequip-train -cn tutorial_les.yaml
 
 To write test xyz file with BEC, run
 ```bash
-nequip-train -cn test_bec_xyz.yaml cutoff_radius=4.5 training_module.model.checkpoint_path={checkpoint.pth}
+nequip-train -cn test_bec_xyz.yaml cutoff_radius=4.5 training_module.model.checkpoint_path={best.ckpt}
 ```
 
 This config file is an example of a NequIP LES model.
