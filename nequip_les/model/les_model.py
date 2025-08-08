@@ -16,6 +16,18 @@ def LESEnergyModel(
     bec_output_index: Optional[int] = None,
     **kwargs
 ) -> GraphModel:
+    """
+    Function to create a LES energy model.
+    Parameters:
+        use_les (bool): Whether to use LES in the model.
+        les_args (Optional[Dict]): Arguments for the LES module.
+        compute_bec (bool): Whether to compute the Born effective charge.
+        bec_output_index (Optional[int]): Index for the Born effective charge output.
+        **kwargs: Additional keyword arguments for the NequIPGNNEnergyModel.
+    Returns:
+        GraphModel: The LES energy model.
+    """
+    
     SR_Model = NequIPGNNEnergyModel(**kwargs)
     if use_les:
         if not isinstance(SR_Model, SequentialGraphNetwork):
@@ -27,8 +39,7 @@ def LESEnergyModel(
             compute_bec=compute_bec, 
             bec_output_index=bec_output_index
         )
-        if bec_output_index is not None:
-            print('!'*50, type(bec_output_index))
+
     else:
         model = SR_Model
     return model

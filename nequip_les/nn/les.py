@@ -4,10 +4,11 @@ import torch
 from nequip.data import AtomicDataDict
 from nequip.nn._graph_mixin import GraphModuleMixin
 
-from typing import Optional, List, Union
+from typing import Optional
 
 
 class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
+    """Latent Ewald Sum module for computing long-range energy contributions."""
 
     def __init__(
         self,
