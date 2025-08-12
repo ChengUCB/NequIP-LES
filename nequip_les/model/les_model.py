@@ -4,7 +4,7 @@ from nequip.nn import (
     GraphModel, ForceStressOutput, SequentialGraphNetwork
 )
 from typing import Dict, Optional
-from ..nn import Add_LES_to_model
+from .les_output import Add_LES_to_model
 
 
 

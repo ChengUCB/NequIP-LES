@@ -1,7 +1,7 @@
 # This file is a part of the `nequip-les` package. Please see LICENSE and README at the root for information on using it.
 from nequip.nn import SequentialGraphNetwork, AtomwiseReduce, ScalarMLP
 from nequip.data import AtomicDataDict
-from . import LatentEwaldSum, AddEnergy
+from ..nn.les import LatentEwaldSum, AddEnergy
 
 from typing import Dict, Optional
 
