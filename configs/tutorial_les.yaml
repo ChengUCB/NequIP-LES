@@ -215,15 +215,15 @@ training_module:
   model:
     _target_: nequip_les.model.LESModel
     # == LES option ==
-    use_les: true 
-    les_args:
-      use_atomwise: false
-      sigma: 1.0
-      dl: 2.0
-      remove_mean: true
-      epsilon_factor: 1.0
-    #compute_bec: true # can turn this option on for bec inference (set false if you don't need during training)
-    #bec_output_index: null # you can choose 0,1,2 (x,y,z)
+    LES:
+      les_args:
+        use_atomwise: false
+        sigma: 1.0
+        dl: 2.0
+        remove_mean: true
+        epsilon_factor: 1.0
+      #compute_bec: true # can turn this option on for bec inference (set false if you don't need during training)
+      #bec_output_index: null # you can choose 0,1,2 (x,y,z)
 
     # == basic model params ==
     seed: 456
