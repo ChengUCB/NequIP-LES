@@ -3,6 +3,7 @@
 import torch
 from nequip.data import AtomicDataDict
 from nequip.nn._graph_mixin import GraphModuleMixin
+from les import Les # https://github.com/ChengUCB/les
 
 from typing import Optional
 
@@ -30,12 +31,6 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
                 else {}
             ),
         )
-        try:
-            from les import Les
-        except:
-            raise ImportError(
-                "Cannot import 'les'. Please install the 'les' library from https://github.com/ChengUCB/les."
-                )
         self.les = Les(les_args)
         self.compute_bec = compute_bec
         self.bec_output_index = bec_output_index

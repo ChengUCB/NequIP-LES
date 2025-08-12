@@ -13,6 +13,7 @@ authors = [
 ]
 dependencies = [
 "nequip>=0.13.0",
+"les @ git+https://github.com/ChengUCB/les.git" # v0.1.0
 ]
 
 [project.urls]
