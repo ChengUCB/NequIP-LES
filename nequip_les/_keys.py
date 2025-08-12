@@ -4,10 +4,10 @@ from nequip.data._key_registry import register_fields
 from nequip.data import AtomicDataDict
 
 #key definitions for nequip_les
-LATENT_CHARGE_KEY: Final[str] = "latent_charge"
+LATENT_CHARGE_KEY: Final[str] = "LES_q"
 LR_ENERGY_KEY: Final[str] = "lr_energy"
 SR_ENERGY_KEY: Final[str] = "sr_energy"
-BEC_KEY: Final[str] = "BEC"
+BEC_KEY: Final[str] = "LES_BEC"
 
 
 #key registry for nequip_les

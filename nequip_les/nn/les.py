@@ -69,9 +69,8 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
         les_energy = e_lr.unsqueeze(-1) # (n_graphs,1)
         if self.compute_bec:
             bec = les_result['BEC']
-            bec_flat = bec.view(bec.shape[0], -1) ## (XX, XY, XZ, YX, YY, YZ, ZX, ZY, ZZ)
             assert bec is not None
-            data[AtomicDataDict.BEC_KEY] = bec_flat
+            data[AtomicDataDict.BEC_KEY] = bec
 
         data[self.out_field] = les_energy
         return data

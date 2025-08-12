@@ -57,9 +57,10 @@ trainer:
   
   # and any custom callbakcs that subclass Lightning's Callback parent class
   callbacks:
-  - _target_: nequip_les.train.callbacks.TestTimeXYZFileWriter
+  - _target_: nequip.train.callbacks.TestTimeXYZFileWriter
     out_file: ./predictions/test
     output_fields_from_original_dataset: [total_energy, forces]
+    extra_fields: [LES_q, LES_BEC]
     chemical_symbols: ${chemical_symbols}
 
   #LES-BEC TOGGLE
