@@ -6,6 +6,8 @@ from nequip.nn._graph_mixin import GraphModuleMixin
 from les import Les # https://github.com/ChengUCB/les
 
 from typing import Optional
+from nequip.nn.model_modifier_utils import model_modifier, replace_submodules
+import logging
 
 
 class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
@@ -69,6 +71,33 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
 
         data[self.out_field] = les_energy
         return data
+    
+    @model_modifier(persistent=True)
+    @classmethod
+    def modify_latent_ewald_sum(
+        cls,
+        model,
+        compute_bec: bool = True,
+        bec_output_index: Optional[int] = None,
+    ):
+        """
+        Enable Born effective charge inference in the LatentEwaldSum module.
+        
+        Parameters:
+            model (GraphModel): The model to modify.
+            compute_bec (bool): Whether to compute the Born effective charge.
+            bec_output_index (Optional[int]): Index for the Born effective charge output. 
+            (0, 1, or 2 for x, y, z components)
+        """
+
+        def factory(old_module: LatentEwaldSum) -> LatentEwaldSum:
+            old_module.compute_bec = compute_bec
+            old_module.bec_output_index = bec_output_index
+            logging.getLogger(__name__).info(f"Setting compute_bec to {compute_bec} in LatentEwaldSum")
+            return old_module
+
+        return replace_submodules(model, cls, factory)
+    
 
 class AddEnergy(GraphModuleMixin, torch.nn.Module):
     """Add energy to the total energy of the system."""
