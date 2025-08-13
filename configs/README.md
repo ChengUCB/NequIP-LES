@@ -6,9 +6,19 @@ To begin training, run
 nequip-train -cn tutorial_les.yaml
 ```
 
-To write test xyz file with BEC, run
+There are two different ways to write xyz file with BEC inference. 
+They give the same result but we leave these for as examples using `callback` and `model modifier`.
+
+1.
+To write test xyz file with BEC using `callback`, run
 ```bash
-nequip-train -cn test_bec_xyz.yaml cutoff_radius=4.5 training_module.model.checkpoint_path={best.ckpt}
+nequip-train -cn test_bec_xyz_callback.yaml cutoff_radius=4.5 training_module.model.checkpoint_path={best.ckpt}
+```
+
+2.
+To write test xyz file with BEC using `model modifier`, run
+```bash
+nequip-train -cn test_bec_xyz_modifier.yaml cutoff_radius=4.5 training_module.model.model.checkpoint_path={best.ckpt}
 ```
 
 This config file is an example of a NequIP LES model.
