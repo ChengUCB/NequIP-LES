@@ -3,23 +3,27 @@ from nequip.model import model_builder, NequIPGNNEnergyModel
 from nequip.nn import (
     GraphModel, ForceStressOutput, SequentialGraphNetwork
 )
+from allegro.model import AllegroEnergyModel
+
+from hydra.utils import instantiate
 from typing import Dict, Optional
-from .les_output import Add_LES_to_model
+from .les_output import Add_LES_to_NequIP_model, Add_LES_to_Allegro_model
+
 
 
 
 @model_builder
 def LESEnergyModel(
     LES: Optional[Dict] = None,
+    base_model: Optional[str] = 'nequip',  # 'nequip' or 'allegro'
     **kwargs
 ) -> GraphModel:
     """
     Function to create a LES energy model.
     Parameters:
-        les_args (Optional[Dict]): Arguments for the LES module.
-        compute_bec (bool): Whether to compute the Born effective charge.
-        bec_output_index (Optional[int]): Index for the Born effective charge output.
-        **kwargs: Additional keyword arguments for the NequIPGNNEnergyModel.
+        LES (Optional[Dict]): LES configuration including les_args, compute_bec, bec_output_index.
+        base_model (Optional[str]): Base model type ("nequip" or "allegro"). Defaults to "nequip".
+        **kwargs: Additional keyword arguments for the base model.
     Returns:
         GraphModel: The LES energy model.
     """
@@ -28,17 +32,35 @@ def LESEnergyModel(
         compute_bec = LES.get("compute_bec", False)
         bec_output_index = LES.get("bec_output_index", None)
 
-    SR_Model = NequIPGNNEnergyModel(**kwargs)
-    if not isinstance(SR_Model, SequentialGraphNetwork):
-        raise TypeError(f"LEW Wrapper can only be applied to SequentialGraphNetwork, not {type(SR_Model)}")
-
-
-    model = Add_LES_to_model(
-        SR_Model, 
-        les_args=les_args, 
-        compute_bec=compute_bec, 
-        bec_output_index=bec_output_index
-    )
+    # Create base model
+    if base_model == "nequip":
+        SR_Model = NequIPGNNEnergyModel(**kwargs)
+        if not isinstance(SR_Model, SequentialGraphNetwork):
+            raise TypeError(f"LES Wrapper can only be applied to SequentialGraphNetwork, not {type(SR_Model)}")
+        
+        model = Add_LES_to_NequIP_model(
+            SR_Model,
+            les_args=les_args,
+            compute_bec=compute_bec,
+            bec_output_index=bec_output_index
+        )
+    elif base_model == "allegro":
+        if "avg_num_neighbors" not in kwargs:
+            raise ValueError("avg_num_neighbors must be provided for Allegro model")
+        SR_Model = AllegroEnergyModel(**kwargs)
+        if not isinstance(SR_Model, SequentialGraphNetwork):
+            raise TypeError(f"LES Wrapper can only be applied to SequentialGraphNetwork, not {type(SR_Model)}")
+        
+        model = Add_LES_to_Allegro_model(
+            SR_Model,
+            hidden_layers_width=kwargs['readout_mlp_hidden_layers_width'],
+            avg_num_neighbors=kwargs["avg_num_neighbors"],
+            les_args=les_args,
+            compute_bec=compute_bec,
+            bec_output_index=bec_output_index
+        )
+    else:
+        raise ValueError(f"Unsupported base model: {base_model}")
 
     return model
 
