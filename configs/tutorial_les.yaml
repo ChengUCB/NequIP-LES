@@ -214,6 +214,7 @@ training_module:
   # model details
   model:
     _target_: nequip_les.model.LESModel
+    base_model: nequip
     # == LES option ==
     LES:
       les_args:
