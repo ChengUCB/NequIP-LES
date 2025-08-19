@@ -28,10 +28,9 @@ The `Nequip-LES` package provides the Nequip-LES model for use within the [NequI
 
 `Nequip-LES` now supports both the **[NequIP](https://github.com/mir-group/nequip)** and **[Allegro](https://github.com/mir-group/allegro)**.
 
-You can use the `Allegro` model by changing `base_model: nequip` to `base_model: allegro` in model details.
-
 A minimal example of a config file for training a Nequip-LES model is provided at [`configs/tutorial_les.yaml`](configs/tutorial_les.yaml).
 
+You can use the `Allegro` model by changing `base_model: nequip` to `base_model: allegro` in model details.
 ## License
 This project is licensed under the CC BY-NC 4.0 License.
 
