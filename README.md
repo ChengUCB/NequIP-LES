@@ -58,8 +58,10 @@ And also consider citing:
  3. [Machine learning interatomic potential can infer electrical response](https://arxiv.org/abs/2504.05169)
  
  4. The [original NequIP paper](https://www.nature.com/articles/s41467-022-29939-5)
+
+ 5. The [Allegro paper](https://www.nature.com/articles/s41467-023-36329-y)
     
- 5. The `e3nn` equivariant neural network package used by NequIP, through its [preprint](https://arxiv.org/abs/2207.09453) and/or [code](https://github.com/e3nn/e3nn)
+ 6. The `e3nn` equivariant neural network package used by NequIP, through its [preprint](https://arxiv.org/abs/2207.09453) and/or [code](https://github.com/e3nn/e3nn)
 
 ## Contact and questions
 
