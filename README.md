@@ -12,7 +12,7 @@ In particular, `NequIP-LES` implements the [LES library](https://github.com/Chen
  - [Contact and questions](#contact-and-questions)
 
 ## Installation
-`Nequip-LES` requires the `nequip` package. Details on `nequip` and its required PyTorch versions can be found in [the `nequip` docs](https://nequip.readthedocs.io).
+`Nequip-LES` requires the `nequip` and `allegro` packages. Details on `nequip` and `allegro`and their required PyTorch versions can be found in [the `nequip` docs](https://nequip.readthedocs.io).
 
 `Nequip-LES` can be installed using `pip`
 ```bash
