@@ -1,6 +1,6 @@
 # This file is a part of the `nequip-les` package. Please see LICENSE and README at the root for information on using it.
 import math
-from nequip.nn import SequentialGraphNetwork, AtomwiseReduce, ScalarMLP
+from nequip.nn import SequentialGraphNetwork, AtomwiseReduce, ScalarMLP, PerTypeScaleShift
 from nequip.data import AtomicDataDict
 from allegro.nn import EdgewiseReduce
 from ..nn.les import LatentEwaldSum, AddEnergy
@@ -29,11 +29,11 @@ def Add_LES_to_NequIP_model(model: SequentialGraphNetwork,
     for name, module in dict.items():
         if (isinstance(module, AtomwiseReduce) 
             and module.out_field == AtomicDataDict.TOTAL_ENERGY_KEY):
-            total_energy_readout = module
-            total_e_key = name
-            break
+            total_energy_readout, total_e_key = module, name
+        elif (isinstance(module, PerTypeScaleShift)
+            and module.out_field == AtomicDataDict.PER_ATOM_ENERGY_KEY):
+            prev_irreps_out = module.irreps_out
 
-    prev_irreps_out = total_energy_readout.irreps_out
     model._modules.pop(total_e_key)
 
     sr_energy_sum = AtomwiseReduce(
@@ -89,11 +89,11 @@ def Add_LES_to_Allegro_model(model: SequentialGraphNetwork,
     for name, module in dict.items():
         if (isinstance(module, AtomwiseReduce) 
             and module.out_field == AtomicDataDict.TOTAL_ENERGY_KEY):
-            total_energy_readout = module
-            total_e_key = name
-            break
+            total_energy_readout, total_e_key = module, name
+        elif (isinstance(module, PerTypeScaleShift)
+            and module.out_field == AtomicDataDict.PER_ATOM_ENERGY_KEY):
+            prev_irreps_out = module.irreps_out
 
-    prev_irreps_out = total_energy_readout.irreps_out
     model._modules.pop(total_e_key)
 
     sr_energy_sum = AtomwiseReduce(
