@@ -25,3 +25,5 @@ This config file is an example of a NequIP LES model.
 
 The config file is adopted from the NequIP example config file. (https://github.com/mir-group/nequip/blob/main/configs/tutorial.yaml)
 The config based tutorial is meant to be used with the user guide: https://nequip.readthedocs.io/en/latest/guide/guide.html
+
+For the Allegro LES example config file, check here [https://github.com/ChengUCB/les_fit/blob/main/MLIPs/Allegro-LES/water/allegroles-r-4.5-nl-3-l-2/lr_r45_nlayer3_lmax2.yaml]
