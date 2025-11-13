@@ -53,7 +53,7 @@ If you use this code in your academic work, please cite:
 And also consider citing:
  1. [Latent Ewald summation for machine learning of long-range interactions](https://www.nature.com/articles/s41524-025-01577-7)
     
- 2. [Learning charges and long-range interactions from energies and forces](https://arxiv.org/abs/2412.15455)
+ 2. [Machine learning of charges and long-range interactions from energies and forces](https://www.nature.com/articles/s41467-025-63852-x)
     
  3. [Machine learning interatomic potential can infer electrical response](https://arxiv.org/abs/2504.05169)
  
