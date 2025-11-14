@@ -27,3 +27,14 @@ The config file is adopted from the NequIP example config file. (https://github.
 The config based tutorial is meant to be used with the user guide: https://nequip.readthedocs.io/en/latest/guide/guide.html
 
 For the Allegro LES example config file, check here [https://github.com/ChengUCB/les_fit/blob/main/MLIPs/Allegro-LES/water/allegroles-r-4.5-nl-3-l-2/lr_r45_nlayer3_lmax2.yaml]
+
+
+### Compilation
+To begin training with compilation, run 
+```bash
+nequip-train -cn tutorial_les_compile.yaml
+```
+For this compilation run, please use the https://github.com/ChengUCB/les/tree/develop branch 
+to use the `torch.compile` friendly vectorized Ewald module. 
+
+For more information about NequIP Compilation, please refer to https://nequip.readthedocs.io/en/latest/guide/accelerations/pt2_compilation.html
