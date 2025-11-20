@@ -1,5 +1,9 @@
-To get the tutorial training data,
-download the data from: https://github.com/ChengUCB/les_fit/tree/main/data-benchmark
+To get the tutorial training data, run:
+```bash
+python get_tutorial_data.py
+```
+
+Data source: https://github.com/ChengUCB/les_fit/tree/main/data-benchmark
 
 To begin training, run
 ```bash
