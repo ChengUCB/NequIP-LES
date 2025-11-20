@@ -17,7 +17,7 @@
 run: [train, test]
 
 
-# the following parameters (cutoff_radius, chemical_symbols, model_type_names, monitored_metric) are not used directly by the config parser
+# the following parameters (cutoff_radius, chemical_species, model_type_names, monitored_metric) are not used directly by the config parser
 # but parameters that should share the same values are present in different parts of the config
 # thus, we use variable interpolation to keep their multiple instances consistent
 # i.e. we only ever have to change the values here instead of everywhere it's necessary to
@@ -35,13 +35,13 @@ num_features: 32    # the multiplicity of the features, 32 is a good default for
 # There is the conventional atomic species (e.g. C, H), and a separate `type_names` known to the model.
 # The model only knows types based on a set of zero-based indices and user-given `type_names` argument.
 # An example where this distinction is necessary include datasets with the same atomic species with different charge states:
-# we could define `chemical_symbols: [C, C]` and model `type_names: [C3, C4]` for +3 and +4 charge states.
+# we could define `chemical_species: [C, C]` and model `type_names: [C3, C4]` for +3 and +4 charge states.
 # There could also be instances such as coarse graining we only care about the model's `type_names` (no need to define chemical species).
 # Because of this distinction, these variables show up as arguments across different categories, including, data, model, metrics and even callbacks.
 # In this case, we fix both to be the same, so we define a single set of each here and use variable interpolation to retrieve them below.
 # This ensures a single location where the values are set to reduce the chances of misconfiguring runs.
-chemical_symbols: [H, O] 
-model_type_names: ${chemical_symbols}
+model_type_names: [H, O]
+chemical_species: ${model_type_names}
 
 # We want a metric to condition training on (e.g. for best `ModelCheckpoint`, `EarlyStopping`, LR scheduling) which will show up in various places later on, so we set up a "single source of truth" to interpolate over
 monitored_metric: val0_epoch/weighted_sum
@@ -71,17 +71,19 @@ data:
   # the transforms are only performed right before data is given to the model
   # data is kept in its untransformed form
   
+  # `transforms` convert data from the Dataset to a form that can be used by the ML model
   transforms:
-    # data doesn't usually come with a neighborlist -- this tranforms prepares the neighborlist
+    # the models only know atom types, which can be different from the chemical species (e.g. C, H)
+    # in this case, the atom types are the same as the chemical species (H, C, O, Cu), so we can omit
+    # `chemical_species_to_atom_type_map` and it will default to an identity mapping
+    # if `model_type_names` were something like ["my_H", "carbon", "oxygen", "copper"], then you would need
+    # to explicitly provide the mapping: chemical_species_to_atom_type_map: {H: my_H, C: carbon, O: oxygen, Cu: copper}
+    - _target_: nequip.data.transforms.ChemicalSpeciesToAtomTypeMapper
+      model_type_names: ${model_type_names}
+      # chemical_species_to_atom_type_map: ${list_to_identity_dict:${chemical_species}}
+    # data doesn't usually come with a neighborlist -- this transform prepares the neighborlist
     - _target_: nequip.data.transforms.NeighborListTransform
       r_max: ${cutoff_radius}
-    # the models only know atom types, which can be different from the chemical species (e.g. C, H)
-    # for instance we can have data with different charge states of carbon, which means they are
-    # all labeled by chemical species `C`, but may have different atom type labels based on the charge states
-    # in this case, the atom types are the same as the chemical species, but we still have to include this
-    # transformation to ensure that the data has 0-indexed atom type lists used in the various model operations 
-    - _target_: nequip.data.transforms.ChemicalSpeciesToAtomTypeMapper
-      chemical_symbols: ${chemical_symbols}
 
   # the following are torch.utils.data.DataLoader configs excluding the arguments `dataset` and `collate_fn`
   # https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader
@@ -265,13 +267,4 @@ training_module:
     #pair_potential:
     #  _target_: nequip.nn.pair_potential.ZBL
     #  units: metal     # Ang and kcal/mol, LAMMPS unit names;  allowed values "metal" and "real"
-    #  chemical_species: ${chemical_symbols}   # must tell ZBL the chemical species of the various model atom types
-
-
-# ====================
-#    GLOBAL OPTIONS   
-# ====================
-global_options:
-  # whether to use TensorFloat32, which will be faster on GPUs with tensor cores at the cost of precision loss
-  # see "Advanced Usage" section of the docs for more details
-  allow_tf32: false
+    #  chemical_species: ${chemical_species}   # must tell ZBL the chemical species of the various model atom types

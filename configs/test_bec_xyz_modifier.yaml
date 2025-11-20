@@ -99,11 +99,3 @@ training_module:
     model:
       _target_: nequip.model.ModelFromCheckpoint
       checkpoint_path: 
-
-# ====================
-#    GLOBAL OPTIONS   
-# ====================
-global_options:
-  # whether to use TensorFloat32, which will be faster on GPUs with tensor cores at the cost of precision loss
-  # see "Advanced Usage" section of the docs for more details
-  allow_tf32: false
