@@ -38,7 +38,7 @@ To begin training with compilation, run
 ```bash
 nequip-train -cn tutorial_les_compile.yaml
 ```
-For this compilation run, please use the https://github.com/ChengUCB/les/tree/develop branch 
+For this compilation run, please set 'is_periodic' 
 to use the `torch.compile` friendly vectorized Ewald module. 
 
 For more information about NequIP Compilation, please refer to https://nequip.readthedocs.io/en/latest/guide/accelerations/pt2_compilation.html

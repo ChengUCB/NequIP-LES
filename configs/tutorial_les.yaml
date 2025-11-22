@@ -222,9 +222,14 @@ training_module:
       les_args:
         use_atomwise: false
         sigma: 1.0
-        dl: 2.0
+        dl: 2.0 # default
         remove_mean: true
         epsilon_factor: 1.0
+				
+				# == arguments for vectorized Ewald ==
+        #is_periodic: true # true or false to use vectorized Ewald module. true for periodic systems (false for non-periodic)
+        #N_max: 10 # default increase if (cell vector length) > N_max * dl
+
       #compute_bec: true # can turn this option on for bec inference (set false if you don't need during training)
       #bec_output_index: null # you can choose 0,1,2 (x,y,z)
 

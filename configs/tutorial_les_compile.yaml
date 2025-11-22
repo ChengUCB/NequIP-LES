@@ -224,11 +224,13 @@ training_module:
         use_atomwise: false # default false, no need to change
         sigma: 1.0 # default value
         dl: 2.0 # default value
-        vectorized: True # True to use Ewald_vectorized, is_periodic and N_max args needed.
-        is_periodic: true # set to true for periodic systems (false for non-periodic)
-        N_max: 10 # usually enough, but increase if (cell vector length)/dl > N_max
         remove_mean: true
         epsilon_factor: 1.0
+
+				# == arguments for vectorized Ewald ==
+        is_periodic: true # true or false to use torch.compile. true for periodic systems (false for non-periodic)
+        N_max: 10 # default increase if (cell vector length) > N_max * dl
+
       #compute_bec: true # can turn this option on for bec inference (set false if you don't need during training)
       #bec_output_index: null # you can choose 0,1,2 (x,y,z)
 
