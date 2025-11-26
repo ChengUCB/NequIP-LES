@@ -225,8 +225,8 @@ training_module:
         dl: 2.0 # default
         remove_mean: true
         epsilon_factor: 1.0
-				
-				# == arguments for vectorized Ewald ==
+
+        # == arguments for vectorized Ewald ==
         #is_periodic: true # true or false to use vectorized Ewald module. true for periodic systems (false for non-periodic)
         #N_max: 10 # default increase if (cell vector length) > N_max * dl
 
