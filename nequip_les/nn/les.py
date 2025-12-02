@@ -4,7 +4,7 @@ import torch
 from nequip.data import AtomicDataDict
 from nequip.nn._graph_mixin import GraphModuleMixin
 from les import Les # https://github.com/ChengUCB/les
-
+from .. import _keys
 from typing import Optional
 from nequip.nn.model_modifier_utils import model_modifier, replace_submodules
 import logging
@@ -68,7 +68,7 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
         if self.compute_bec:
             bec = les_result['BEC']
             assert bec is not None
-            data[AtomicDataDict.BEC_KEY] = bec
+            data[_keys.BEC_KEY] = bec
 
         data[self.out_field] = les_energy
         return data

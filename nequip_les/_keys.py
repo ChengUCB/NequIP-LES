@@ -1,7 +1,6 @@
 # This file is a part of the `nequip-les` package. Please see LICENSE and README at the root for information on using it.
 from typing import Final
 from nequip.data._key_registry import register_fields
-from nequip.data import AtomicDataDict
 
 #key definitions for nequip_les
 LATENT_CHARGE_KEY: Final[str] = "LES_q"
@@ -30,9 +29,3 @@ register_fields(
         BEC_KEY: "ij" 
     }
 )
-
-setattr(AtomicDataDict, 'LATENT_CHARGE_KEY', LATENT_CHARGE_KEY)
-setattr(AtomicDataDict, 'LR_ENERGY_KEY', LR_ENERGY_KEY)
-setattr(AtomicDataDict, 'SR_ENERGY_KEY', SR_ENERGY_KEY)
-setattr(AtomicDataDict, 'BEC_KEY', BEC_KEY)
-setattr(AtomicDataDict, 'EDGE_LATENT_CHARGE_KEY', EDGE_LATENT_CHARGE_KEY)
