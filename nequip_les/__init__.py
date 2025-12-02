@@ -3,4 +3,4 @@ from ._version import __version__
 from . import _keys
 from . import _extern
 
-__all__ = ["__version__", "_extern"]
+__all__ = ["__version__", "_keys", "_extern"]

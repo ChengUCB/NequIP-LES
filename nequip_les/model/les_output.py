@@ -9,7 +9,7 @@ from nequip.nn import (
 from nequip.data import AtomicDataDict
 from allegro.nn import EdgewiseReduce
 from ..nn.les import LatentEwaldSum, AddEnergy
-
+from .. import _keys
 from typing import Dict, Optional
 
 
@@ -51,21 +51,21 @@ def Add_LES_to_NequIP_model(
         irreps_in=prev_irreps_out,
         reduce="sum",
         field=AtomicDataDict.PER_ATOM_ENERGY_KEY,
-        out_field=AtomicDataDict.SR_ENERGY_KEY,
+        out_field=_keys.SR_ENERGY_KEY,
     )
     latent_charge_readout = ScalarMLP(
         output_dim=1,
         bias=False,
         forward_weight_init=True,
         field=AtomicDataDict.NODE_FEATURES_KEY,
-        out_field=AtomicDataDict.LATENT_CHARGE_KEY,
+        out_field=_keys.LATENT_CHARGE_KEY,
         irreps_in=sr_energy_sum.irreps_out,
     )
 
     lr_energy_sum = LatentEwaldSum(
         irreps_in=latent_charge_readout.irreps_out,
-        field=AtomicDataDict.LATENT_CHARGE_KEY,
-        out_field=AtomicDataDict.LR_ENERGY_KEY,
+        field=_keys.LATENT_CHARGE_KEY,
+        out_field=_keys.LR_ENERGY_KEY,
         les_args=les_args,
         compute_bec=compute_bec,
         bec_output_index=bec_output_index,
@@ -73,8 +73,8 @@ def Add_LES_to_NequIP_model(
 
     total_energy_sum = AddEnergy(
         irreps_in=lr_energy_sum.irreps_out,
-        field1=AtomicDataDict.SR_ENERGY_KEY,
-        field2=AtomicDataDict.LR_ENERGY_KEY,
+        field1=_keys.SR_ENERGY_KEY,
+        field2=_keys.LR_ENERGY_KEY,
         out_field=AtomicDataDict.TOTAL_ENERGY_KEY,
     )
 
@@ -117,7 +117,7 @@ def Add_LES_to_Allegro_model(
         irreps_in=prev_irreps_out,
         reduce="sum",
         field=AtomicDataDict.PER_ATOM_ENERGY_KEY,
-        out_field=AtomicDataDict.SR_ENERGY_KEY,
+        out_field=_keys.SR_ENERGY_KEY,
     )
     edge_latent_charge_readout = ScalarMLP(
         output_dim=1,
@@ -127,13 +127,13 @@ def Add_LES_to_Allegro_model(
         bias=False,
         forward_weight_init=True,
         field=AtomicDataDict.EDGE_FEATURES_KEY,
-        out_field=AtomicDataDict.EDGE_LATENT_CHARGE_KEY,
+        out_field=_keys.EDGE_LATENT_CHARGE_KEY,
         irreps_in=sr_energy_sum.irreps_out,
     )
 
     edge_charge_sum = EdgewiseReduce(
-        field=AtomicDataDict.EDGE_LATENT_CHARGE_KEY,
-        out_field=AtomicDataDict.LATENT_CHARGE_KEY,
+        field=_keys.EDGE_LATENT_CHARGE_KEY,
+        out_field=_keys.LATENT_CHARGE_KEY,
         factor=1.0 / math.sqrt(2 * avg_num_neighbors),
         # ^ factor of 2 to normalize dE/dr_i which includes both contributions from dE/dr_ij and every other derivative against r_ji
         irreps_in=edge_latent_charge_readout.irreps_out,
@@ -141,8 +141,8 @@ def Add_LES_to_Allegro_model(
 
     lr_energy_sum = LatentEwaldSum(
         irreps_in=edge_charge_sum.irreps_out,
-        field=AtomicDataDict.LATENT_CHARGE_KEY,
-        out_field=AtomicDataDict.LR_ENERGY_KEY,
+        field=_keys.LATENT_CHARGE_KEY,
+        out_field=_keys.LR_ENERGY_KEY,
         les_args=les_args,
         compute_bec=compute_bec,
         bec_output_index=bec_output_index,
@@ -150,8 +150,8 @@ def Add_LES_to_Allegro_model(
 
     total_energy_sum = AddEnergy(
         irreps_in=lr_energy_sum.irreps_out,
-        field1=AtomicDataDict.SR_ENERGY_KEY,
-        field2=AtomicDataDict.LR_ENERGY_KEY,
+        field1=_keys.SR_ENERGY_KEY,
+        field2=_keys.LR_ENERGY_KEY,
         out_field=AtomicDataDict.TOTAL_ENERGY_KEY,
     )
 
