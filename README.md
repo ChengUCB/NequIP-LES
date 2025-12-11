@@ -1,6 +1,6 @@
 ## NequIP-LES
 
-This package implements the `NequIP-LES` shown in [A universal augmentation framework for long-range electrostatics in machine learning interatomic potentials](https://arxiv.org/abs/2507.14302).
+This package implements the `NequIP-LES` shown in [A universal augmentation framework for long-range electrostatics in machine learning interatomic potentials](https://pubs.acs.org/doi/10.1021/acs.jctc.5c01400).
 
 In particular, `NequIP-LES` implements the [LES library](https://github.com/ChengUCB/les) as an **extension package** for the [NequIP framework](https://github.com/mir-group/nequip).
 
@@ -43,11 +43,14 @@ LAMMPS Integration has not been tested yet.
 If you use this code in your academic work, please cite:
 
 ```text
-@article{Kim2025universal,
+@article{Kim2025Universalb,
   title = {A Universal Augmentation Framework for Long-Range Electrostatics in Machine Learning Interatomic Potentials},
-  author = {Kim, Dongjin and Wang, Xiaoyu and Zhong, Peichen and King, Daniel S. and Inizan, Theo Jaffrelot and Cheng, Bingqing},
-  journal={arXiv preprint arXiv:2507.14302},
-  year = {2025}
+  author = {Kim, Dongjin and Wang, Xiaoyu and Vargas, Santiago and Zhong, Peichen and King, Daniel S. and Inizan, Theo Jaffrelot and Cheng, Bingqing},
+  year = 2025,
+  journal = {Journal of Chemical Theory and Computation},
+  publisher = {American Chemical Society},
+  doi = {10.1021/acs.jctc.5c01400}
+}
 ```
 
 And also consider citing:
