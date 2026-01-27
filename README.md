@@ -17,6 +17,7 @@ In particular, `NequIP-LES` implements the [LES library](https://github.com/Chen
 `Nequip-LES` can be installed using `pip`
 ```bash
 git clone https://github.com/ChengUCB/NequIP-LES.git
+cd NequIP-LES
 pip install -e . 
 ```
 Installing `Nequip-LES` in this way will also install the `nequip` package from PyPI and `les` package from GitHub.
