@@ -34,6 +34,14 @@ For the Allegro LES example config file, check here [https://github.com/ChengUCB
 
 
 ### Compilation
+For now, compilation of NequIP-LES needs to use `develop` branch for `LES`.
+```
+git clone https://github.com/ChengUCB/les.git
+cd les
+git checkout develop
+pip install -e .
+```
+
 To begin training with compilation, run 
 ```bash
 nequip-train -cn tutorial_les_compile.yaml
