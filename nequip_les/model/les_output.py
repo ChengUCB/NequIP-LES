@@ -3,12 +3,14 @@ import math
 from nequip.nn import (
     SequentialGraphNetwork,
     AtomwiseReduce,
+    AtomwiseLinear,
     ScalarMLP,
     PerTypeScaleShift,
 )
 from nequip.data import AtomicDataDict
 from allegro.nn import EdgewiseReduce
 from ..nn.les import LatentEwaldSum, AddEnergy
+from ..nn.vector_readout import VectorMultiReadout
 from .. import _keys
 from typing import Dict, Optional
 
@@ -44,8 +46,28 @@ def Add_LES_to_NequIP_model(
             and module.out_field == AtomicDataDict.PER_ATOM_ENERGY_KEY
         ):
             prev_irreps_out = module.irreps_out
+    
+    # options to add additional readouts for dipole if specified in les_args
+    if les_args is not None and les_args.get("use_dipole", False):
+        # Find last convolutional layer to insert dipole readout before the layer
+        last_conv_name = [name for name in dict.keys() if "convnet" in name][-1]
+        last_conv_module = dict[last_conv_name]
+        has_l1 = any(ir.l == 1 and ir.p == -1 for _, ir in last_conv_module.irreps_in["node_features"])
+        if not has_l1:
+            raise ValueError(
+                f''' Current irreps_in for node features in last conv layer: {last_conv_module.irreps_in["node_features"]}.
+                Adding LES dipole readout requires 1o (vector) node features in convolutional layers.'''
+            )
+        latent_dipole_readout = AtomwiseLinear( #TODO: consider vector MLP for dipole readout instead of single linear layer
+            field=AtomicDataDict.NODE_FEATURES_KEY,
+            out_field=_keys.LATENT_DIPOLE_KEY,
+            irreps_in=last_conv_module.irreps_in,
+            irreps_out="1x1o",
+        )
+        model.insert("latent_dipole_readout", latent_dipole_readout, before=last_conv_name)
 
-    model._modules.pop(total_e_key)
+    # remove original total energy readout to replace with new one that includes LES energy
+    model._modules.pop(total_e_key) 
 
     sr_energy_sum = AtomwiseReduce(
         irreps_in=prev_irreps_out,
@@ -78,8 +100,34 @@ def Add_LES_to_NequIP_model(
         out_field=AtomicDataDict.TOTAL_ENERGY_KEY,
     )
 
+    # append new modules to the model
     model.append("sr_energy_sum", sr_energy_sum)
     model.append("latent_charge_readout", latent_charge_readout)
+
+    # options to add additional readouts for induced charge and dipole if specified in les_args
+    if les_args is not None and les_args.get("use_induced_charge", False):
+        latent_kappa_readout = ScalarMLP(
+            output_dim=1,
+            bias=False,
+            forward_weight_init=True,
+            field=AtomicDataDict.NODE_FEATURES_KEY,
+            out_field=_keys.LATENT_CHEMICAL_SOFTNESS_KEY,
+            irreps_in=sr_energy_sum.irreps_out,
+        )
+        model.append("latent_kappa_readout", latent_kappa_readout)
+
+    if les_args is not None and les_args.get("use_induced_dipole", False):
+        latent_alpha_readout = ScalarMLP(
+            output_dim=1,
+            bias=False,
+            forward_weight_init=True,
+            field=AtomicDataDict.NODE_FEATURES_KEY,
+            out_field=_keys.LATENT_POLARIZABILITY_KEY,
+            irreps_in=sr_energy_sum.irreps_out,
+        )
+        model.append("latent_alpha_readout", latent_alpha_readout)
+
+    # append LES energy modules after readouts
     model.append("lr_energy_sum", lr_energy_sum)
     model.append("total_energy_sum", total_energy_sum)
 

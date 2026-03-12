@@ -63,6 +63,7 @@ def LESModel(
         )
         model.func = energy_model
     else:
-        raise ValueError(f"Unsupported base model: {base_model}")
+        raise ValueError(f'''Unsupported base model: {base_model}. \n
+                         Supported base models are "nequip" and "allegro".''')
 
     return model

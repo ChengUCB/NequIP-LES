@@ -33,9 +33,15 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
                 else {}
             ),
         )
+        
         self.les = Les(les_args)
+        self.use_dipole = les_args.get("use_dipole", False)
+        self.use_induced_charge = les_args.get("use_induced_charge", False)
+        self.use_induced_dipole = les_args.get("use_induced_dipole", False)
+
         self.compute_bec = compute_bec
         self.bec_output_index = bec_output_index
+        
 
 
     def forward(self, data: AtomicDataDict.Type) -> AtomicDataDict.Type:
@@ -52,9 +58,16 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
             # cell = torch.zeros((len(torch.unique(batch)), 3, 3), # potential issue with torch.compile 
             cell = torch.zeros((AtomicDataDict.num_frames(data), 3, 3),
                                device=pos.device, dtype=pos.dtype)
+            
+        les_u = data[_keys.LATENT_DIPOLE_KEY] if hasattr(self, 'use_dipole') and self.use_dipole else None
+        les_kappa = data[_keys.LATENT_CHEMICAL_SOFTNESS_KEY] if hasattr(self, 'use_induced_charge') and self.use_induced_charge else None
+        les_alpha = data[_keys.LATENT_POLARIZABILITY_KEY] if hasattr(self, 'use_induced_dipole') and self.use_induced_dipole else None
 
         les_result = self.les(
-            latent_charges=q, 
+            latent_charges=q,
+            latent_dipoles=les_u,
+            latent_alphas=les_alpha,
+            latent_kappas=les_kappa,
             positions=pos,
             batch=batch,
             cell=cell,
