@@ -10,7 +10,6 @@ from nequip.nn import (
 from nequip.data import AtomicDataDict
 from allegro.nn import EdgewiseReduce
 from ..nn.les import LatentEwaldSum, AddEnergy
-from ..nn.vector_readout import VectorMultiReadout
 from .. import _keys
 from typing import Dict, Optional
 
