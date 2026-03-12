@@ -64,6 +64,7 @@ def Add_LES_to_NequIP_model(
             irreps_out="1x1o",
         )
         model.insert("latent_dipole_readout", latent_dipole_readout, before=last_conv_name)
+        print('*** USE_DIPOLE ***')
 
     # remove original total energy readout to replace with new one that includes LES energy
     model._modules.pop(total_e_key) 
@@ -114,6 +115,7 @@ def Add_LES_to_NequIP_model(
             irreps_in=sr_energy_sum.irreps_out,
         )
         model.append("latent_kappa_readout", latent_kappa_readout)
+        print('*** USE_INDUCED_CHARGE ***')
 
     if les_args is not None and les_args.get("use_induced_dipole", False):
         latent_alpha_readout = ScalarMLP(
@@ -125,7 +127,8 @@ def Add_LES_to_NequIP_model(
             irreps_in=sr_energy_sum.irreps_out,
         )
         model.append("latent_alpha_readout", latent_alpha_readout)
-
+        print('*** USE_INDUCED_DIPOLE ***')
+    
     # append LES energy modules after readouts
     model.append("lr_energy_sum", lr_energy_sum)
     model.append("total_energy_sum", total_energy_sum)
