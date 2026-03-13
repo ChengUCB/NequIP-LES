@@ -8,6 +8,7 @@ from .. import _keys
 from typing import Optional
 from nequip.nn.model_modifier_utils import model_modifier, replace_submodules
 import logging
+import torch.nn.functional as F
 
 
 class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
@@ -39,6 +40,10 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
         self.use_induced_charge = les_args.get("use_induced_charge", False)
         self.use_induced_dipole = les_args.get("use_induced_dipole", False)
 
+        self.kappa_alpha_positive = les_args.get("kappa_alpha_positive", True)
+        self.kappa_scale = les_args.get("kappa_scale", 0.1)
+        self.alpha_scale = les_args.get("alpha_scale", 0.1)
+
         self.compute_bec = compute_bec
         self.bec_output_index = bec_output_index
         
@@ -63,6 +68,17 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
         les_kappa = data[_keys.LATENT_CHEMICAL_SOFTNESS_KEY] if hasattr(self, 'use_induced_charge') and self.use_induced_charge else None
         les_alpha = data[_keys.LATENT_POLARIZABILITY_KEY] if hasattr(self, 'use_induced_dipole') and self.use_induced_dipole else None
 
+        if hasattr(self, 'kappa_alpha_positive') and self.kappa_alpha_positive:
+            if les_kappa is not None:
+                les_kappa = F.softplus(les_kappa)
+            if les_alpha is not None:
+                les_alpha = F.softplus(les_alpha)
+
+        if les_kappa is not None and hasattr(self, 'kappa_scale'):
+            les_kappa = les_kappa * self.kappa_scale
+        if les_alpha is not None and hasattr(self, 'alpha_scale'):
+            les_alpha = les_alpha * self.alpha_scale
+        
         les_result = self.les(
             latent_charges=q,
             latent_dipoles=les_u,
@@ -81,9 +97,16 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
         if self.compute_bec:
             bec = les_result['BEC']
             assert bec is not None
+            # if bec.dim() > 2 and bec.shape[1] == 2:
+                # bec = bec.sum(dim=1, keepdim=False)
+            # assert bec.dim() in [2, 3], f'BEC output dimension error: expected 2 or 3, got {bec.dim()}'
             data[_keys.BEC_KEY] = bec
 
         data[self.out_field] = les_energy
+        if les_kappa is not None:
+            data[_keys.LATENT_CHEMICAL_SOFTNESS_KEY] = les_kappa
+        if les_alpha is not None:
+            data[_keys.LATENT_POLARIZABILITY_KEY] = les_alpha
         return data
     
     @model_modifier(persistent=True)
