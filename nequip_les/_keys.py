@@ -12,7 +12,10 @@ EDGE_LATENT_CHARGE_KEY: Final[str] = "edge_LES_q"
 LATENT_DIPOLE_KEY: Final[str] = "LES_u"
 LATENT_POLARIZABILITY_KEY: Final[str] = "LES_alpha"
 LATENT_CHEMICAL_SOFTNESS_KEY: Final[str] = "LES_kappa"
-
+EDGE_LATENT_DIPOLE_WEIGHT_KEY: Final[str] = "edge_LES_u_weight"
+EDGE_LATENT_DIPOLE_KEY: Final[str] = "edge_LES_u"
+EDGE_LATENT_POLARIZABILITY_KEY: Final[str] = "edge_LES_alpha"
+EDGE_LATENT_CHEMICAL_SOFTNESS_KEY: Final[str] = "edge_LES_kappa"
 
 # key registry for nequip_les
 # check nequip.data._key_registry for more information
@@ -21,6 +24,8 @@ register_fields(
                  LATENT_DIPOLE_KEY, LATENT_POLARIZABILITY_KEY, 
                  LATENT_CHEMICAL_SOFTNESS_KEY],
     graph_fields=[LR_ENERGY_KEY, SR_ENERGY_KEY],
-    edge_fields=[EDGE_LATENT_CHARGE_KEY],
+    edge_fields=[EDGE_LATENT_CHARGE_KEY, 
+                 EDGE_LATENT_DIPOLE_WEIGHT_KEY, EDGE_LATENT_DIPOLE_KEY, 
+                 EDGE_LATENT_POLARIZABILITY_KEY, EDGE_LATENT_CHEMICAL_SOFTNESS_KEY],
     cartesian_tensor_fields={BEC_KEY: "ij"},
 )

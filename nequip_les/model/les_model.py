@@ -55,8 +55,9 @@ def LESModel(
 
         energy_model = Add_LES_to_Allegro_model(
             energy_model,
-            hidden_layers_width=kwargs["readout_mlp_hidden_layers_width"],
             avg_num_neighbors=kwargs["avg_num_neighbors"],
+            hidden_layers_width=kwargs["readout_mlp_hidden_layers_width"],
+            type_names=kwargs["type_names"],
             les_args=les_args,
             compute_bec=compute_bec,
             bec_output_index=bec_output_index,

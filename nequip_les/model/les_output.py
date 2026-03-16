@@ -10,8 +10,9 @@ from nequip.nn import (
 from nequip.data import AtomicDataDict
 from allegro.nn import EdgewiseReduce
 from ..nn.les import LatentEwaldSum, AddEnergy
+from ..nn.edge_product import EdgeDipoleProduct
 from .. import _keys
-from typing import Dict, Optional
+from typing import Dict, Optional, Union, Sequence
 
 
 def Add_LES_to_NequIP_model(
@@ -139,7 +140,8 @@ def Add_LES_to_NequIP_model(
 def Add_LES_to_Allegro_model(
     model: SequentialGraphNetwork,
     avg_num_neighbors: float,
-    hidden_layers_width: int,
+    hidden_layers_width: Union[float, Dict[str, float]],
+    type_names: Sequence[str],
     les_args: Optional[Dict] = None,
     compute_bec: bool = False,
     bec_output_index: Optional[int] = None,
@@ -184,8 +186,8 @@ def Add_LES_to_Allegro_model(
     edge_charge_sum = EdgewiseReduce(
         field=_keys.EDGE_LATENT_CHARGE_KEY,
         out_field=_keys.LATENT_CHARGE_KEY,
-        factor=1.0 / math.sqrt(2 * avg_num_neighbors),
-        # ^ factor of 2 to normalize dE/dr_i which includes both contributions from dE/dr_ij and every other derivative against r_ji
+        avg_num_neighbors=avg_num_neighbors,
+        type_names=type_names,
         irreps_in=edge_latent_charge_readout.irreps_out,
     )
 
@@ -208,6 +210,84 @@ def Add_LES_to_Allegro_model(
     model.append("sr_energy_sum", sr_energy_sum)
     model.append("edge_latent_charge_readout", edge_latent_charge_readout)
     model.append("edge_charge_sum", edge_charge_sum)
+
+    # options to add additional readouts for dipole if specified in les_args
+    if les_args is not None and les_args.get("use_dipole", False):
+        # weights for dipole readout on edges
+        edge_latent_dipole_weight_readout = ScalarMLP(
+            output_dim=1,
+            hidden_layers_depth=1,
+            hidden_layers_width=hidden_layers_width,
+            bias=False,
+            forward_weight_init=True,
+            field=AtomicDataDict.EDGE_FEATURES_KEY,
+            out_field=_keys.EDGE_LATENT_DIPOLE_WEIGHT_KEY,
+            irreps_in=sr_energy_sum.irreps_out,
+        )
+        # produce dipole vector for each edge 
+        edge_dipole_product = EdgeDipoleProduct(
+            weight_field=_keys.EDGE_LATENT_DIPOLE_WEIGHT_KEY,
+            attrs_field=AtomicDataDict.EDGE_ATTRS_KEY,
+            out_field=_keys.EDGE_LATENT_DIPOLE_KEY,
+            irreps_in=edge_latent_dipole_weight_readout.irreps_out,
+        )
+        edge_dipole_sum = EdgewiseReduce(
+            field=_keys.EDGE_LATENT_DIPOLE_KEY,
+            out_field=_keys.LATENT_DIPOLE_KEY,
+            avg_num_neighbors=avg_num_neighbors,
+            type_names=type_names,
+            irreps_in=edge_dipole_product.irreps_out,
+        )
+        model.append("edge_latent_dipole_weight_readout", edge_latent_dipole_weight_readout)
+        model.append("edge_dipole_product", edge_dipole_product)
+        model.append("edge_dipole_sum", edge_dipole_sum)
+        print('*** USE_DIPOLE ***')
+    
+    # options to add additional readouts for induced charge and dipole if specified in les_args
+    if les_args is not None and les_args.get("use_induced_charge", False):
+        edge_latent_kappa_readout = ScalarMLP(
+            output_dim=1,
+            hidden_layers_depth=1,
+            hidden_layers_width=hidden_layers_width,
+            bias=False,
+            forward_weight_init=True,
+            field=AtomicDataDict.EDGE_FEATURES_KEY,
+            out_field=_keys.EDGE_LATENT_CHEMICAL_SOFTNESS_KEY,
+            irreps_in=sr_energy_sum.irreps_out,
+        )
+        edge_kappa_sum = EdgewiseReduce(
+            field=_keys.EDGE_LATENT_CHEMICAL_SOFTNESS_KEY,
+            out_field=_keys.LATENT_CHEMICAL_SOFTNESS_KEY,
+            avg_num_neighbors=avg_num_neighbors,
+            type_names=type_names,
+            irreps_in=edge_latent_kappa_readout.irreps_out,
+        )
+        model.append("edge_latent_kappa_readout", edge_latent_kappa_readout)
+        model.append("edge_kappa_sum", edge_kappa_sum)
+        print('*** USE_INDUCED_CHARGE ***')
+
+    if les_args is not None and les_args.get("use_induced_dipole", False):
+        edge_latent_alpha_readout = ScalarMLP(
+            output_dim=1,
+            hidden_layers_depth=1,
+            hidden_layers_width=hidden_layers_width,
+            bias=False,
+            forward_weight_init=True,
+            field=AtomicDataDict.EDGE_FEATURES_KEY,
+            out_field=_keys.EDGE_LATENT_POLARIZABILITY_KEY,
+            irreps_in=sr_energy_sum.irreps_out,
+        )
+        edge_alpha_sum = EdgewiseReduce(
+            field=_keys.EDGE_LATENT_POLARIZABILITY_KEY,
+            out_field=_keys.LATENT_POLARIZABILITY_KEY,
+            avg_num_neighbors=avg_num_neighbors,
+            type_names=type_names,
+            irreps_in=edge_latent_alpha_readout.irreps_out,
+        )
+        model.append("edge_latent_alpha_readout", edge_latent_alpha_readout)
+        model.append("edge_alpha_sum", edge_alpha_sum)
+        print('*** USE_INDUCED_DIPOLE ***')
+
     model.append("lr_energy_sum", lr_energy_sum)
     model.append("total_energy_sum", total_energy_sum)
 
