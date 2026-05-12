@@ -57,7 +57,7 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
         pos = data[AtomicDataDict.POSITIONS_KEY]
         batch = data.get(AtomicDataDict.BATCH_KEY)
         if batch is None:
-            batch = torch.zeros(pos.shape[0], dtype=pos.dtype, device=pos.device)
+            batch = torch.zeros(pos.shape[0], dtype=torch.long, device=pos.device)
 
         if AtomicDataDict.CELL_KEY in data:
             cell = data[AtomicDataDict.CELL_KEY].view(-1, 3, 3)
@@ -69,7 +69,7 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
         les_u = data[_keys.LATENT_DIPOLE_KEY] if hasattr(self, 'use_dipole') and self.use_dipole else None
         les_kappa = data[_keys.LATENT_CHEMICAL_SOFTNESS_KEY] if hasattr(self, 'use_induced_charge') and self.use_induced_charge else None
         les_alpha = data[_keys.LATENT_POLARIZABILITY_KEY] if hasattr(self, 'use_induced_dipole') and self.use_induced_dipole else None #[N,1] or [N,3,3]
-        les_quad = data.get(_keys.LATENT_QUAD_KEY) if hasattr(self, 'use_quad') and self.use_quad else None
+        les_quad = data[_keys.LATENT_QUAD_KEY] if hasattr(self, 'use_quad') and self.use_quad else None
 
         if hasattr(self, 'kappa_alpha_positive') and self.kappa_alpha_positive:
             if les_kappa is not None:

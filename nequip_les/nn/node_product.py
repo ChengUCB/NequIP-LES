@@ -83,9 +83,8 @@ class NodeAssembleTensor(GraphModuleMixin, torch.nn.Module):
             scalar = data[self.scalar_field]  # [N, 1]
             result = scalar.view(-1, 1, 1) * eye.unsqueeze(0)  # [N, 3, 3]
         for field in self.contrib_fields:
-            if field in data:
-                contrib = data[field]
-                result = contrib if result is None else result + contrib
+            contrib = data[field]
+            result = contrib if result is None else result + contrib
 
         if result is not None:
             if self.traceless:

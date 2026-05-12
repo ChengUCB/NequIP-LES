@@ -9,7 +9,7 @@ from nequip.nn import (
 from nequip.data import AtomicDataDict
 from allegro.nn import EdgewiseReduce
 from ..nn.les import LatentEwaldSum, AddEnergy
-from ..nn.edge_product import EdgeDipoleProduct
+from ..nn.edge_product import EdgeDipoleProduct, EdgeOuterProduct, EdgeSpherical2eProduct
 from ..nn.node_product import NodeOuterProduct, NodeSpherical2eToCartesian, NodeAssembleTensor
 from .. import _keys
 from typing import Dict, Optional, Union, Sequence
@@ -117,6 +117,8 @@ def Add_LES_to_NequIP_model(
         if use_aniso_alpha:
             if not les_args.get("use_induced_dipole", False):
                 raise ValueError("use_anisotropic_polarizability requires use_induced_dipole=True")
+            if "1o" not in alpha_irreps and "2e" not in alpha_irreps:
+                raise ValueError(f'Set alpha_irreps to include 1o or 2e (e.g. "0e+1o+2e" or "1o+2e" or "1o").')
             if not (has_l1 or has_l2):
                 raise ValueError(
                     f'use_anisotropic_polarizability=True requires 1o or 2e node features, but got: {node_features_irreps}. '
@@ -230,7 +232,13 @@ def Add_LES_to_NequIP_model(
         )
         model.append("quad_assemble", quad_assemble)
 
-    if use_aniso_alpha and alpha_contrib_fields:
+    if use_aniso_alpha:
+        if not alpha_contrib_fields:
+            raise ValueError(
+                f"use_anisotropic_polarizability=True but no tensor contributions could be built. "
+                f"alpha_irreps={alpha_irreps!r}, has_l1={has_l1}, has_l2={has_l2}. "
+                f"Check that alpha_irreps matches the available model features."
+            )
         alpha_assemble = NodeAssembleTensor(
             out_field=_keys.LATENT_POLARIZABILITY_KEY,
             irreps_in=latent_charge_readout.irreps_out,
@@ -271,6 +279,11 @@ def Add_LES_to_Allegro_model(
             and module.out_field == AtomicDataDict.PER_ATOM_ENERGY_KEY
         ):
             prev_irreps_out = module.irreps_out
+
+    use_dipole = les_args is not None and les_args.get("use_dipole", False)
+    use_quad = les_args is not None and les_args.get("use_quadrupole", False)
+    use_aniso_alpha = les_args is not None and les_args.get("use_anisotropic_polarizability", False)
+    alpha_irreps = les_args.get("alpha_irreps", "0e+1o+2e") if les_args else "0e"
 
     model._modules.pop(total_e_key)
 
@@ -321,7 +334,7 @@ def Add_LES_to_Allegro_model(
     model.append("edge_charge_sum", edge_charge_sum)
 
     # options to add additional readouts for dipole if specified in les_args
-    if les_args is not None and les_args.get("use_dipole", False):
+    if use_dipole:
         # weights for dipole readout on edges
         edge_latent_dipole_weight_readout = ScalarMLP(
             output_dim=1,
@@ -396,6 +409,157 @@ def Add_LES_to_Allegro_model(
         model.append("edge_latent_alpha_readout", edge_latent_alpha_readout)
         model.append("edge_alpha_sum", edge_alpha_sum)
         print('*** USE_INDUCED_DIPOLE ***')
+
+    if use_quad or use_aniso_alpha:
+        # Detect 1o/2e availability from edge_attrs irreps
+        edge_attrs_irreps = None
+        for _, module in modules.items():
+            irreps_out = getattr(module, 'irreps_out', {})
+            if AtomicDataDict.EDGE_ATTRS_KEY in irreps_out:
+                edge_attrs_irreps = irreps_out[AtomicDataDict.EDGE_ATTRS_KEY]
+                break
+        if edge_attrs_irreps is not None:
+            has_l1 = any(ir.l == 1 and ir.p == -1 for _, ir in edge_attrs_irreps)
+            has_l2 = any(ir.l == 2 and ir.p == 1  for _, ir in edge_attrs_irreps)
+        else:
+            l_max = les_args.get("l_max", 1) if les_args else 1
+            has_l1 = l_max >= 1
+            has_l2 = l_max >= 2
+
+        if use_quad:
+            if not (has_l1 or has_l2):
+                raise ValueError(
+                    'use_quadrupole=True requires l_max >= 1 in the Allegro model '
+                    '(edge_attrs must contain 1o or 2e components).'
+                )
+            quad_contrib_fields = []
+            if has_l1:
+                edge_quad_1o_weight = ScalarMLP(
+                    output_dim=1,
+                    hidden_layers_depth=1,
+                    hidden_layers_width=hidden_layers_width,
+                    bias=False,
+                    forward_weight_init=True,
+                    field=AtomicDataDict.EDGE_FEATURES_KEY,
+                    out_field=_keys.EDGE_QUAD_1O_WEIGHT_KEY,
+                    irreps_in=sr_energy_sum.irreps_out,
+                )
+                edge_quad_1o_outer = EdgeOuterProduct(
+                    weight_field=_keys.EDGE_QUAD_1O_WEIGHT_KEY,
+                    attrs_field=AtomicDataDict.EDGE_ATTRS_KEY,
+                    out_field=_keys.LATENT_QUAD_1O_KEY,
+                    irreps_in=edge_quad_1o_weight.irreps_out,
+                    avg_num_neighbors=avg_num_neighbors,
+                    type_names=type_names,
+                    traceless=True,
+                )
+                model.append("edge_quad_1o_weight", edge_quad_1o_weight)
+                model.append("edge_quad_1o_outer", edge_quad_1o_outer)
+                quad_contrib_fields.append(_keys.LATENT_QUAD_1O_KEY)
+                print('*** USE_QUADRUPOLE (1o) ***')
+            if has_l2:
+                edge_quad_2e_weight = ScalarMLP(
+                    output_dim=1,
+                    hidden_layers_depth=1,
+                    hidden_layers_width=hidden_layers_width,
+                    bias=False,
+                    forward_weight_init=True,
+                    field=AtomicDataDict.EDGE_FEATURES_KEY,
+                    out_field=_keys.EDGE_QUAD_2E_WEIGHT_KEY,
+                    irreps_in=sr_energy_sum.irreps_out,
+                )
+                edge_quad_2e_outer = EdgeSpherical2eProduct(
+                    weight_field=_keys.EDGE_QUAD_2E_WEIGHT_KEY,
+                    attrs_field=AtomicDataDict.EDGE_ATTRS_KEY,
+                    out_field=_keys.LATENT_QUAD_2E_KEY,
+                    irreps_in=edge_quad_2e_weight.irreps_out,
+                    avg_num_neighbors=avg_num_neighbors,
+                    type_names=type_names,
+                )
+                model.append("edge_quad_2e_weight", edge_quad_2e_weight)
+                model.append("edge_quad_2e_outer", edge_quad_2e_outer)
+                quad_contrib_fields.append(_keys.LATENT_QUAD_2E_KEY)
+                print('*** USE_QUADRUPOLE (2e) ***')
+            quad_assemble = NodeAssembleTensor(
+                out_field=_keys.LATENT_QUAD_KEY,
+                irreps_in=edge_charge_sum.irreps_out,
+                scalar_field=None,
+                contrib_fields=quad_contrib_fields,
+                traceless=True,
+            )
+            model.append("quad_assemble", quad_assemble)
+
+        if use_aniso_alpha:
+            if not les_args.get("use_induced_dipole", False):
+                raise ValueError("use_anisotropic_polarizability requires use_induced_dipole=True")
+            if not (has_l1 or has_l2):
+                raise ValueError(
+                    'use_anisotropic_polarizability=True requires l_max >= 1 in the Allegro model.'
+                )
+            if "1o" not in alpha_irreps and "2e" not in alpha_irreps:
+                raise ValueError(f'Set alpha_irreps to include 1o or 2e (e.g. "0e+1o+2e" or "1o"). Got: {alpha_irreps!r}')
+            alpha_contrib_fields = []
+            if has_l1 and "1o" in alpha_irreps:
+                edge_alpha_1o_weight = ScalarMLP(
+                    output_dim=1,
+                    hidden_layers_depth=1,
+                    hidden_layers_width=hidden_layers_width,
+                    bias=False,
+                    forward_weight_init=True,
+                    field=AtomicDataDict.EDGE_FEATURES_KEY,
+                    out_field=_keys.EDGE_ANISO_ALPHA_1O_WEIGHT_KEY,
+                    irreps_in=sr_energy_sum.irreps_out,
+                )
+                edge_alpha_1o_outer = EdgeOuterProduct(
+                    weight_field=_keys.EDGE_ANISO_ALPHA_1O_WEIGHT_KEY,
+                    attrs_field=AtomicDataDict.EDGE_ATTRS_KEY,
+                    out_field=_keys.LATENT_ANISO_ALPHA_1O_KEY,
+                    irreps_in=edge_alpha_1o_weight.irreps_out,
+                    avg_num_neighbors=avg_num_neighbors,
+                    type_names=type_names,
+                    traceless=False,
+                )
+                model.append("edge_alpha_1o_weight", edge_alpha_1o_weight)
+                model.append("edge_alpha_1o_outer", edge_alpha_1o_outer)
+                alpha_contrib_fields.append(_keys.LATENT_ANISO_ALPHA_1O_KEY)
+                print('*** USE_ANISOTROPIC_POLARIZABILITY (1o) ***')
+            if has_l2 and "2e" in alpha_irreps:
+                edge_alpha_2e_weight = ScalarMLP(
+                    output_dim=1,
+                    hidden_layers_depth=1,
+                    hidden_layers_width=hidden_layers_width,
+                    bias=False,
+                    forward_weight_init=True,
+                    field=AtomicDataDict.EDGE_FEATURES_KEY,
+                    out_field=_keys.EDGE_ANISO_ALPHA_2E_WEIGHT_KEY,
+                    irreps_in=sr_energy_sum.irreps_out,
+                )
+                edge_alpha_2e_outer = EdgeSpherical2eProduct(
+                    weight_field=_keys.EDGE_ANISO_ALPHA_2E_WEIGHT_KEY,
+                    attrs_field=AtomicDataDict.EDGE_ATTRS_KEY,
+                    out_field=_keys.LATENT_ANISO_ALPHA_2E_KEY,
+                    irreps_in=edge_alpha_2e_weight.irreps_out,
+                    avg_num_neighbors=avg_num_neighbors,
+                    type_names=type_names,
+                )
+                model.append("edge_alpha_2e_weight", edge_alpha_2e_weight)
+                model.append("edge_alpha_2e_outer", edge_alpha_2e_outer)
+                alpha_contrib_fields.append(_keys.LATENT_ANISO_ALPHA_2E_KEY)
+                print('*** USE_ANISOTROPIC_POLARIZABILITY (2e) ***')
+            if not alpha_contrib_fields:
+                raise ValueError(
+                    f"use_anisotropic_polarizability=True but no tensor contributions could be built. "
+                    f"alpha_irreps={alpha_irreps!r}, has_l1={has_l1}, has_l2={has_l2}. "
+                    f"Check that alpha_irreps matches the available model features."
+                )
+            alpha_assemble = NodeAssembleTensor(
+                out_field=_keys.LATENT_POLARIZABILITY_KEY,
+                irreps_in=edge_charge_sum.irreps_out,
+                scalar_field=_keys.LATENT_POLARIZABILITY_KEY,
+                contrib_fields=alpha_contrib_fields,
+                traceless=False,
+            )
+            model.append("alpha_assemble", alpha_assemble)
 
     model.append("lr_energy_sum", lr_energy_sum)
     model.append("total_energy_sum", total_energy_sum)
