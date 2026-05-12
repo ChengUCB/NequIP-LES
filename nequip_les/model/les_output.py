@@ -1,5 +1,4 @@
 # This file is a part of the `nequip-les` package. Please see LICENSE and README at the root for information on using it.
-import math
 from nequip.nn import (
     SequentialGraphNetwork,
     AtomwiseReduce,
@@ -11,6 +10,7 @@ from nequip.data import AtomicDataDict
 from allegro.nn import EdgewiseReduce
 from ..nn.les import LatentEwaldSum, AddEnergy
 from ..nn.edge_product import EdgeDipoleProduct
+from ..nn.node_product import NodeOuterProduct, NodeSpherical2eToCartesian, NodeAssembleTensor
 from .. import _keys
 from typing import Dict, Optional, Union, Sequence
 
@@ -33,42 +33,132 @@ def Add_LES_to_NequIP_model(
     Returns:
         SequentialGraphNetwork: The modified model with LES modules added.
     """
-    # Implementation to add LES to the model
-    dict = model._modules
-    for name, module in dict.items():
+    modules = model._modules
+    for name, module in modules.items():
         if (
             isinstance(module, AtomwiseReduce)
             and module.out_field == AtomicDataDict.TOTAL_ENERGY_KEY
         ):
-            _total_energy_readout, total_e_key = module, name
+            total_e_key = name
         elif (
             isinstance(module, PerTypeScaleShift)
             and module.out_field == AtomicDataDict.PER_ATOM_ENERGY_KEY
         ):
             prev_irreps_out = module.irreps_out
-    
-    # options to add additional readouts for dipole if specified in les_args
-    if les_args is not None and les_args.get("use_dipole", False):
-        # Find last convolutional layer to insert dipole readout before the layer
-        last_conv_name = [name for name in dict.keys() if "convnet" in name][-1]
-        last_conv_module = dict[last_conv_name]
-        has_l1 = any(ir.l == 1 and ir.p == -1 for _, ir in last_conv_module.irreps_in["node_features"])
-        if not has_l1:
-            raise ValueError(
-                f''' Current irreps_in for node features in last conv layer: {last_conv_module.irreps_in["node_features"]}.
-                Adding LES dipole readout requires 1o (vector) node features in convolutional layers.'''
+
+    use_dipole = les_args is not None and les_args.get("use_dipole", False)
+    use_quad = les_args is not None and les_args.get("use_quadrupole", False)
+    use_aniso_alpha = les_args is not None and les_args.get("use_anisotropic_polarizability", False)
+    alpha_irreps = les_args.get("alpha_irreps", "0e+1o+2e") if les_args else "0e"
+
+    # Insert feature-space readouts before the last convolutional layer
+    if use_dipole or use_quad or use_aniso_alpha:
+        last_conv_name = [name for name in modules.keys() if "convnet" in name][-1]
+        last_conv_module = modules[last_conv_name]
+        node_features_irreps = last_conv_module.irreps_in["node_features"]
+        has_l1 = any(ir.l == 1 and ir.p == -1 for _, ir in node_features_irreps)
+        has_l2 = any(ir.l == 2 and ir.p == 1  for _, ir in node_features_irreps)
+
+        if use_dipole:
+            if not has_l1:
+                raise ValueError(
+                    f'LES dipole readout requires 1o node features. Got: {node_features_irreps}'
+                )
+            latent_dipole_readout = AtomwiseLinear(
+                field=AtomicDataDict.NODE_FEATURES_KEY,
+                out_field=_keys.LATENT_DIPOLE_KEY,
+                irreps_in=last_conv_module.irreps_in,
+                irreps_out="1x1o",
             )
-        latent_dipole_readout = AtomwiseLinear( #TODO: consider vector MLP for dipole readout instead of single linear layer
-            field=AtomicDataDict.NODE_FEATURES_KEY,
-            out_field=_keys.LATENT_DIPOLE_KEY,
-            irreps_in=last_conv_module.irreps_in,
-            irreps_out="1x1o",
-        )
-        model.insert("latent_dipole_readout", latent_dipole_readout, before=last_conv_name)
-        print('*** USE_DIPOLE ***')
+            model.insert("latent_dipole_readout", latent_dipole_readout, before=last_conv_name)
+            print('*** USE_DIPOLE ***')
+
+        if use_quad:
+            if not (has_l1 or has_l2):
+                raise ValueError(
+                    f'use_quadrupole=True requires 1o or 2e node features, but got: {node_features_irreps}. '
+                    f'Set l_max >= 1 and parity=True.'
+                )
+            quad_contrib_fields = []
+            if has_l1:
+                quad_1o_readout = AtomwiseLinear(
+                    field=AtomicDataDict.NODE_FEATURES_KEY,
+                    out_field=_keys._LATENT_QUAD_1O_VEC_KEY,
+                    irreps_in=last_conv_module.irreps_in,
+                    irreps_out="1x1o",
+                )
+                quad_1o_outer = NodeOuterProduct(
+                    in_field=_keys._LATENT_QUAD_1O_VEC_KEY,
+                    out_field=_keys.LATENT_QUAD_1O_KEY,
+                    irreps_in=quad_1o_readout.irreps_out,
+                    traceless=True,
+                )
+                model.insert("quad_1o_readout", quad_1o_readout, before=last_conv_name)
+                model.insert("quad_1o_outer", quad_1o_outer, before=last_conv_name)
+                quad_contrib_fields.append(_keys.LATENT_QUAD_1O_KEY)
+                print('*** USE_QUADRUPOLE (1o) ***')
+            if has_l2:
+                quad_2e_readout = AtomwiseLinear(
+                    field=AtomicDataDict.NODE_FEATURES_KEY,
+                    out_field=_keys._LATENT_QUAD_2E_SPH_KEY,
+                    irreps_in=last_conv_module.irreps_in,
+                    irreps_out="1x2e",
+                )
+                quad_2e_cart = NodeSpherical2eToCartesian(
+                    in_field=_keys._LATENT_QUAD_2E_SPH_KEY,
+                    out_field=_keys.LATENT_QUAD_2E_KEY,
+                    irreps_in=quad_2e_readout.irreps_out,
+                )
+                model.insert("quad_2e_readout", quad_2e_readout, before=last_conv_name)
+                model.insert("quad_2e_cart", quad_2e_cart, before=last_conv_name)
+                quad_contrib_fields.append(_keys.LATENT_QUAD_2E_KEY)
+                print('*** USE_QUADRUPOLE (2e) ***')
+
+        if use_aniso_alpha:
+            if not les_args.get("use_induced_dipole", False):
+                raise ValueError("use_anisotropic_polarizability requires use_induced_dipole=True")
+            if not (has_l1 or has_l2):
+                raise ValueError(
+                    f'use_anisotropic_polarizability=True requires 1o or 2e node features, but got: {node_features_irreps}. '
+                    f'Set l_max >= 1 and parity=True.'
+                )
+            alpha_contrib_fields = []
+            if has_l1 and "1o" in alpha_irreps:
+                alpha_1o_readout = AtomwiseLinear(
+                    field=AtomicDataDict.NODE_FEATURES_KEY,
+                    out_field=_keys._LATENT_ALPHA_1O_VEC_KEY,
+                    irreps_in=last_conv_module.irreps_in,
+                    irreps_out="1x1o",
+                )
+                alpha_1o_outer = NodeOuterProduct(
+                    in_field=_keys._LATENT_ALPHA_1O_VEC_KEY,
+                    out_field=_keys.LATENT_ANISO_ALPHA_1O_KEY,
+                    irreps_in=alpha_1o_readout.irreps_out,
+                    traceless=False,
+                )
+                model.insert("alpha_1o_readout", alpha_1o_readout, before=last_conv_name)
+                model.insert("alpha_1o_outer", alpha_1o_outer, before=last_conv_name)
+                alpha_contrib_fields.append(_keys.LATENT_ANISO_ALPHA_1O_KEY)
+                print('*** USE_ANISOTROPIC_POLARIZABILITY (1o) ***')
+            if has_l2 and "2e" in alpha_irreps:
+                alpha_2e_readout = AtomwiseLinear(
+                    field=AtomicDataDict.NODE_FEATURES_KEY,
+                    out_field=_keys._LATENT_ALPHA_2E_SPH_KEY,
+                    irreps_in=last_conv_module.irreps_in,
+                    irreps_out="1x2e",
+                )
+                alpha_2e_cart = NodeSpherical2eToCartesian(
+                    in_field=_keys._LATENT_ALPHA_2E_SPH_KEY,
+                    out_field=_keys.LATENT_ANISO_ALPHA_2E_KEY,
+                    irreps_in=alpha_2e_readout.irreps_out,
+                )
+                model.insert("alpha_2e_readout", alpha_2e_readout, before=last_conv_name)
+                model.insert("alpha_2e_cart", alpha_2e_cart, before=last_conv_name)
+                alpha_contrib_fields.append(_keys.LATENT_ANISO_ALPHA_2E_KEY)
+                print('*** USE_ANISOTROPIC_POLARIZABILITY (2e) ***')
 
     # remove original total energy readout to replace with new one that includes LES energy
-    model._modules.pop(total_e_key) 
+    model._modules.pop(total_e_key)
 
     sr_energy_sum = AtomwiseReduce(
         irreps_in=prev_irreps_out,
@@ -101,11 +191,10 @@ def Add_LES_to_NequIP_model(
         out_field=AtomicDataDict.TOTAL_ENERGY_KEY,
     )
 
-    # append new modules to the model
+    # append scalar readouts
     model.append("sr_energy_sum", sr_energy_sum)
     model.append("latent_charge_readout", latent_charge_readout)
 
-    # options to add additional readouts for induced charge and dipole if specified in les_args
     if les_args is not None and les_args.get("use_induced_charge", False):
         latent_kappa_readout = ScalarMLP(
             output_dim=1,
@@ -129,7 +218,28 @@ def Add_LES_to_NequIP_model(
         )
         model.append("latent_alpha_readout", latent_alpha_readout)
         print('*** USE_INDUCED_DIPOLE ***')
-    
+
+    # assemble final tensor fields from contributions computed above
+    if use_quad and quad_contrib_fields:
+        quad_assemble = NodeAssembleTensor(
+            out_field=_keys.LATENT_QUAD_KEY,
+            irreps_in=latent_charge_readout.irreps_out,
+            scalar_field=None,
+            contrib_fields=quad_contrib_fields,
+            traceless=True,
+        )
+        model.append("quad_assemble", quad_assemble)
+
+    if use_aniso_alpha and alpha_contrib_fields:
+        alpha_assemble = NodeAssembleTensor(
+            out_field=_keys.LATENT_POLARIZABILITY_KEY,
+            irreps_in=latent_charge_readout.irreps_out,
+            scalar_field=_keys.LATENT_POLARIZABILITY_KEY,
+            contrib_fields=alpha_contrib_fields,
+            traceless=False,
+        )
+        model.append("alpha_assemble", alpha_assemble)
+
     # append LES energy modules after readouts
     model.append("lr_energy_sum", lr_energy_sum)
     model.append("total_energy_sum", total_energy_sum)
@@ -149,14 +259,13 @@ def Add_LES_to_Allegro_model(
     """
     Function to add LES modules to a Allegro model.
     """
-    # Implementation to add LES to the model
-    dict = model._modules
-    for name, module in dict.items():
+    modules = model._modules
+    for name, module in modules.items():
         if (
             isinstance(module, AtomwiseReduce)
             and module.out_field == AtomicDataDict.TOTAL_ENERGY_KEY
         ):
-            _total_energy_readout, total_e_key = module, name
+            total_e_key = name
         elif (
             isinstance(module, PerTypeScaleShift)
             and module.out_field == AtomicDataDict.PER_ATOM_ENERGY_KEY

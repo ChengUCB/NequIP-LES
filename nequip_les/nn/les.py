@@ -39,6 +39,8 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
         self.use_dipole = les_args.get("use_dipole", False)
         self.use_induced_charge = les_args.get("use_induced_charge", False)
         self.use_induced_dipole = les_args.get("use_induced_dipole", False)
+        self.use_quad = les_args.get("use_quadrupole", False)
+        self.use_anisotropic_polarizability = les_args.get("use_anisotropic_polarizability", False)
 
         self.kappa_alpha_positive = les_args.get("kappa_alpha_positive", True)
         self.kappa_scale = les_args.get("kappa_scale", 0.1)
@@ -66,29 +68,34 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
             
         les_u = data[_keys.LATENT_DIPOLE_KEY] if hasattr(self, 'use_dipole') and self.use_dipole else None
         les_kappa = data[_keys.LATENT_CHEMICAL_SOFTNESS_KEY] if hasattr(self, 'use_induced_charge') and self.use_induced_charge else None
-        les_alpha = data[_keys.LATENT_POLARIZABILITY_KEY] if hasattr(self, 'use_induced_dipole') and self.use_induced_dipole else None
+        les_alpha = data[_keys.LATENT_POLARIZABILITY_KEY] if hasattr(self, 'use_induced_dipole') and self.use_induced_dipole else None #[N,1] or [N,3,3]
+        les_quad = data.get(_keys.LATENT_QUAD_KEY) if hasattr(self, 'use_quad') and self.use_quad else None
 
         if hasattr(self, 'kappa_alpha_positive') and self.kappa_alpha_positive:
             if les_kappa is not None:
                 les_kappa = F.softplus(les_kappa)
             if les_alpha is not None:
-                les_alpha = F.softplus(les_alpha)
+                if les_alpha.dim() == 2:
+                    les_alpha = F.softplus(les_alpha) # [N, 1]
+                elif les_alpha.dim() == 3:
+                    les_alpha = torch.bmm(les_alpha, les_alpha.transpose(-1, -2)) # [N,3,3]  A @ A^T PSD
 
         if les_kappa is not None and hasattr(self, 'kappa_scale'):
             les_kappa = les_kappa * self.kappa_scale
         if les_alpha is not None and hasattr(self, 'alpha_scale'):
             les_alpha = les_alpha * self.alpha_scale
-        
+
         les_result = self.les(
             latent_charges=q,
             latent_dipoles=les_u,
+            latent_quads=les_quad,
             latent_alphas=les_alpha,
             latent_kappas=les_kappa,
             positions=pos,
             batch=batch,
             cell=cell,
             compute_energy=True,
-            compute_bec = self.compute_bec,
+            compute_bec=self.compute_bec,
             bec_output_index=self.bec_output_index,
         )
         e_lr = les_result['E_lr'] # (n_graphs,)
