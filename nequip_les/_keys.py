@@ -49,5 +49,9 @@ register_fields(
                  EDGE_LATENT_QUAD_KEY, EDGE_LATENT_POLARIZABILITY_KEY, EDGE_LATENT_CHEMICAL_SOFTNESS_KEY,
                  EDGE_QUAD_1O_WEIGHT_KEY, EDGE_QUAD_2E_WEIGHT_KEY,
                  EDGE_ANISO_ALPHA_1O_WEIGHT_KEY, EDGE_ANISO_ALPHA_2E_WEIGHT_KEY],
-    cartesian_tensor_fields={BEC_KEY: "ij"},
+    cartesian_tensor_fields={
+        BEC_KEY: "ij",
+        LATENT_POLARIZABILITY_KEY: "ij",
+        LATENT_QUAD_KEY: "ij",
+    },
 )
