@@ -48,7 +48,10 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
 
         self.compute_bec = compute_bec
         self.bec_output_index = bec_output_index
-        
+
+        # None -> legacy Ewald (decides per structure), True/False -> vectorized
+        self._les_is_periodic = les_args.get("is_periodic", None)
+        self._warned_missing_cell = False
 
 
     def forward(self, data: AtomicDataDict.Type) -> AtomicDataDict.Type:
@@ -62,10 +65,26 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
         if AtomicDataDict.CELL_KEY in data:
             cell = data[AtomicDataDict.CELL_KEY].view(-1, 3, 3)
         else:
-            # cell = torch.zeros((len(torch.unique(batch)), 3, 3), # potential issue with torch.compile 
+            if self._les_is_periodic:
+                raise RuntimeError(
+                    "LES is configured as periodic (les_args: is_periodic: true) "
+                    "but the input data contains no cell, so the reciprocal-space "
+                    "sum cannot be evaluated. Deployment targets that do not pass "
+                    "the cell (e.g. LAMMPS pair_allegro) are incompatible with "
+                    "periodic LES: compile for a target that does pass it "
+                    "(pair_nequip, ASE), or set is_periodic: false for a genuinely "
+                    "non-periodic system."
+                )
+            if not self._warned_missing_cell:
+                self._warned_missing_cell = True
+                logging.getLogger(__name__).warning(
+                    "LES received no cell; treating the system as non-periodic. "
+                    "If the system is periodic, use a deployment target that "
+                    "passes the cell."
+                )
             cell = torch.zeros((AtomicDataDict.num_frames(data), 3, 3),
                                device=pos.device, dtype=pos.dtype)
-            
+
         les_u = data[_keys.LATENT_DIPOLE_KEY] if hasattr(self, 'use_dipole') and self.use_dipole else None
         les_kappa = data[_keys.LATENT_CHEMICAL_SOFTNESS_KEY] if hasattr(self, 'use_induced_charge') and self.use_induced_charge else None
         les_alpha = data[_keys.LATENT_POLARIZABILITY_KEY] if hasattr(self, 'use_induced_dipole') and self.use_induced_dipole else None #[N,1] or [N,3,3]
