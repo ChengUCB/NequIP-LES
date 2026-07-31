@@ -1,0 +1,154 @@
+# Allegro-LES smoke test, NON-periodic (dipeptide) -- legacy.
+# legacy loop-based Ewald (is_periodic unset), which cannot be compiled.
+#
+# Full-term LES (uQiqiu): dipoles, quadrupoles, induced charges, induced dipoles
+# with an anisotropic polarizability. Model and schedule are deliberately tiny --
+# this checks that everything runs and that BEC inference works, not accuracy.
+#
+# One of the 12 configurations run by run_all.sh; the LES settings are
+# written out explicitly rather than overridden on the command line.
+
+run: [train, test]
+
+cutoff_radius: 4.0
+num_scalar_features: 16
+
+model_type_names: [C, H, N, O]
+chemical_species: ${model_type_names}
+monitored_metric: val0_epoch/weighted_sum
+
+data:
+  _target_: nequip.data.datamodule.ASEDataModule
+  seed: 456
+  split_dataset:
+    - file_path: data/dipep_train.xyz
+      train: 0.5
+      val: 0.5
+  test_file_path: data/dipep_test.xyz
+  transforms:
+    - _target_: nequip.data.transforms.ChemicalSpeciesToAtomTypeMapper
+      model_type_names: ${model_type_names}
+    - _target_: nequip.data.transforms.NeighborListTransform
+      r_max: ${cutoff_radius}
+  train_dataloader:
+    _target_: torch.utils.data.DataLoader
+    batch_size: 1
+    num_workers: 0
+    shuffle: true
+  val_dataloader:
+    _target_: torch.utils.data.DataLoader
+    batch_size: 1
+    num_workers: 0
+  test_dataloader: ${data.val_dataloader}
+  stats_manager:
+    _target_: nequip.data.CommonDataStatisticsManager
+    type_names: ${model_type_names}
+    dataloader_kwargs:
+      batch_size: 1
+
+trainer:
+  _target_: lightning.Trainer
+  # CPU by default; run_all.sh overrides to gpu when CUDA is available. Not
+  # "auto", which selects MPS on Macs, where NequIP's float64 buffers fail.
+  accelerator: cpu
+  enable_checkpointing: true
+  max_epochs: 2
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 1
+  logger:
+    _target_: lightning.pytorch.loggers.CSVLogger
+    save_dir: .
+  callbacks:
+    # index 0: run_all.sh overrides out_file so the 12 runs do not overwrite
+    # each other. No file extension -- the writer appends it.
+    - _target_: nequip.train.callbacks.TestTimeXYZFileWriter
+      out_file: predictions/allegro_dipep_legacy
+      extra_fields: [LES_q, LES_BEC]         # predicted charges and BECs
+      output_fields_from_original_dataset: [total_energy, forces]
+      chemical_symbols: ${model_type_names}
+    # turns BEC on for the test phase only, so `run: [train, test]` also
+    # exercises BEC inference
+    - _target_: nequip_les.train.callbacks.ToggleLESCallback
+      compute_bec: true
+
+training_module:
+  _target_: nequip.train.EMALightningModule
+  ema_decay: 0.999
+  loss:
+    _target_: nequip.train.EnergyForceLoss
+    per_atom_energy: true
+    coeffs:
+      total_energy: 1.0
+      forces: 1.0
+  val_metrics:
+    _target_: nequip.train.EnergyForceMetrics
+    coeffs:
+      total_energy_mae: 1.0
+      forces_mae: 1.0
+  train_metrics: ${training_module.val_metrics}
+  test_metrics: ${training_module.val_metrics}
+  optimizer:
+    _target_: torch.optim.Adam
+    lr: 0.005
+
+  model:
+    _target_: nequip_les.model.LESModel
+    base_model: allegro
+    compile_mode: eager
+
+    LES:
+      les_args:
+        use_atomwise: false
+        sigma: 1.0
+        dl: 2.0
+        remove_mean: true
+        epsilon_factor: 1.0
+
+        # every long-range term the module supports
+        use_dipole: true
+        use_quadrupole: true
+        use_induced_charge: true
+        use_induced_dipole: true
+        use_anisotropic_polarizability: true
+        alpha_irreps: "0e+1o+2e"
+        kappa_alpha_positive: true
+        kappa_scale: 0.1
+        alpha_scale: 0.1
+
+
+    seed: 456
+    model_dtype: float32
+    type_names: ${model_type_names}
+    r_max: ${cutoff_radius}
+
+    radial_chemical_embed:
+      _target_: allegro.nn.TwoBodyBesselScalarEmbed
+      num_bessels: 8
+      bessel_trainable: false
+      polynomial_cutoff_p: 6
+    radial_chemical_embed_dim: ${num_scalar_features}
+    scalar_embed_mlp_hidden_layers_depth: 1
+    scalar_embed_mlp_hidden_layers_width: ${num_scalar_features}
+    scalar_embed_mlp_nonlinearity: silu
+
+    l_max: 1
+    num_layers: 2
+    num_scalar_features: ${num_scalar_features}
+    num_tensor_features: 8
+    allegro_mlp_hidden_layers_depth: 1
+    allegro_mlp_hidden_layers_width: ${num_scalar_features}
+    allegro_mlp_nonlinearity: silu
+    parity: true
+    tp_path_channel_coupling: true
+    readout_mlp_hidden_layers_depth: 1
+    readout_mlp_hidden_layers_width: ${num_scalar_features}
+    readout_mlp_nonlinearity: silu
+
+    avg_num_neighbors: ${training_data_stats:per_type_num_neighbors_mean}
+    per_type_energy_shifts: ${training_data_stats:per_atom_energy_mean}
+    per_type_energy_scales: ${training_data_stats:forces_rms}
+    per_type_energy_scales_trainable: false
+    per_type_energy_shifts_trainable: false
+
+global_options:
+  allow_tf32: false
