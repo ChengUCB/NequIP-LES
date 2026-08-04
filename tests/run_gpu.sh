@@ -74,6 +74,12 @@ fi
 export NEQUIP_FLOAT32_MODEL_TOL="${NEQUIP_FLOAT32_MODEL_TOL:-1e-3}"
 export NEQUIP_FLOAT64_MODEL_TOL="${NEQUIP_FLOAT64_MODEL_TOL:-1e-6}"
 
+# nequip-compile goes through compile_tf32fix.py: on torch 2.13 + CUDA the per-backend
+# TF32 flags do not start out consistent, and nequip reads the aggregate
+# torch.backends.fp32_precision, which torch then refuses to report. The wrapper
+# normalises the flags first; see its docstring.
+NEQUIP_COMPILE=("$PY" compile_tf32fix.py)
+
 mkdir -p ckpt compiled
 PASSED=(); FAILED=()
 
@@ -110,7 +116,7 @@ export_ckpt() {   # $1 ckpt, $2 row, $3 target, $4 mode, $5... extra nequip-comp
     local name; name=$(echo "$row" | tr '/ ' '__')
     local ext=pt2; [[ "$mode" == torchscript ]] && ext=pth
     local log="compiled/$name.log"
-    nequip-compile --mode "$mode" --device cuda --target "$target" "$@" \
+    "${NEQUIP_COMPILE[@]}" --mode "$mode" --device cuda --target "$target" "$@" \
         "$ck" "compiled/$name.nequip.$ext" > "$log" 2>&1
     record "$row" $? "$log"
 }
