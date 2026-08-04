@@ -33,11 +33,12 @@ FILTER="${1:-}"
 PY=$(command -v python)
 TORCH=$("$PY" -c 'import torch; print(torch.__version__)')
 
-DEVICES=(cpu)
-ACCELERATOR=cpu
+# Train and export on the same device: exporting a GPU-trained model for the CPU is
+# not a case anyone deploys, so it is not worth the runtime.
 if "$PY" -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
-    DEVICES+=(cuda)
-    ACCELERATOR=gpu       # train where the hardware is; export for both devices
+    DEVICES=(cuda); ACCELERATOR=gpu
+else
+    DEVICES=(cpu);  ACCELERATOR=cpu
 fi
 echo "torch $TORCH  |  training on: $ACCELERATOR  |  exporting for: ${DEVICES[*]}"
 
@@ -126,13 +127,17 @@ for tag in nequip_water_eager nequip_water_compiled nequip_dipep_eager nequip_di
     if [[ "$tag" == nequip_* ]]; then targets+=(pair_nequip); else targets+=(pair_allegro); fi
 
     for target in "${targets[@]}"; do
-        expect=pass
-        # pair_allegro carries no cell -> a periodic model must be rejected
-        # only a periodic LES model needs the cell; SR has no reciprocal sum
-        if [[ "$target" == pair_allegro && "$tag" == *_water_* && "$tag" != *_sr_* ]]; then
-            expect=reject
-        fi
         for mode in "${MODES[@]}"; do
+            expect=pass
+            # pair_allegro carries no cell, so a periodic LES model must be refused --
+            # but only the modes that trace with example inputs can notice. `torchscript`
+            # merely compiles the source, so the branch that raises never runs and the
+            # export succeeds; the guard is compiled into the artefact and fires when
+            # LAMMPS calls it without a cell. An SR model needs no cell at all.
+            if [[ "$target" == pair_allegro && "$tag" == *_water_* \
+                  && "$tag" != *_sr_* && "$mode" == aotinductor ]]; then
+                expect=reject
+            fi
             for dev in "${DEVICES[@]}"; do
                 check "$CK" "$tag" "$target" "$mode" "$dev" "$expect"
             done

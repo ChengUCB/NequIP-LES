@@ -25,10 +25,10 @@ data:
   _target_: nequip.data.datamodule.ASEDataModule
   seed: 456
   split_dataset:
-  - file_path: data/dipep_train.xyz
+  - file_path: data/dipep_train_dummycell.xyz
     train: 0.5
     val: 0.5
-  test_file_path: data/dipep_test.xyz
+  test_file_path: data/dipep_test_dummycell.xyz
   transforms:
   - _target_: nequip.data.transforms.ChemicalSpeciesToAtomTypeMapper
     model_type_names: ${model_type_names}
