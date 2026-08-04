@@ -1,36 +1,37 @@
-# Allegro-LES smoke test, NON-periodic (dipeptide) -- eager.
-# vectorized Ewald, no compilation.
+# Short-range reference: the SAME backbone and schedule as allegro_dipep_compiled.yaml, with
+# LES removed entirely. Nothing here is a LES test.
 #
-# Full-term LES (uQiqiu): dipoles, quadrupoles, induced charges, induced dipoles
-# with an anisotropic polarizability. Model and schedule are deliberately tiny --
-# this checks that training runs at all, not accuracy. BEC inference is a
-# separate step -- see run_bec.sh, which reuses the trained checkpoint.
+# It exists so that a failure can be attributed. Twice now a problem looked like a
+# LES bug and turned out to belong to nequip itself -- `derivative for
+# aten::silu_backward is not implemented` under train-time compile on CUDA, and
+# non-finite gradients on the first step for non-periodic data. Both reproduce
+# without LES, and this config is what shows that in one run.
 #
-# One of the 12 configurations run by run_all.sh; the LES settings are
-# written out explicitly rather than overridden on the command line.
-
-run: [train]
-
+# Generated from allegro_dipep_compiled.yaml; keep the two in step when either changes.
+run:
+- train
 cutoff_radius: 4.0
 num_scalar_features: 16
-
-model_type_names: [C, H, N, O]
+model_type_names:
+- C
+- H
+- N
+- O
 chemical_species: ${model_type_names}
 monitored_metric: val0_epoch/weighted_sum
-
 data:
   _target_: nequip.data.datamodule.ASEDataModule
   seed: 456
   split_dataset:
-    - file_path: data/dipep_train.xyz
-      train: 0.5
-      val: 0.5
+  - file_path: data/dipep_train.xyz
+    train: 0.5
+    val: 0.5
   test_file_path: data/dipep_test.xyz
   transforms:
-    - _target_: nequip.data.transforms.ChemicalSpeciesToAtomTypeMapper
-      model_type_names: ${model_type_names}
-    - _target_: nequip.data.transforms.NeighborListTransform
-      r_max: ${cutoff_radius}
+  - _target_: nequip.data.transforms.ChemicalSpeciesToAtomTypeMapper
+    model_type_names: ${model_type_names}
+  - _target_: nequip.data.transforms.NeighborListTransform
+    r_max: ${cutoff_radius}
   train_dataloader:
     _target_: torch.utils.data.DataLoader
     batch_size: 2
@@ -46,11 +47,8 @@ data:
     type_names: ${model_type_names}
     dataloader_kwargs:
       batch_size: 1
-
 trainer:
   _target_: lightning.Trainer
-  # CPU by default; run_all.sh overrides to gpu when CUDA is available. Not
-  # "auto", which selects MPS on Macs, where NequIP's float64 buffers fail.
   accelerator: cpu
   enable_checkpointing: true
   max_epochs: 2
@@ -78,41 +76,13 @@ training_module:
   optimizer:
     _target_: torch.optim.Adam
     lr: 0.005
-
   model:
-    _target_: nequip_les.model.LESModel
-    base_model: allegro
-    compile_mode: eager
-
-    LES:
-      les_args:
-        use_atomwise: false
-        sigma: 1.0
-        dl: 2.0
-        remove_mean: true
-        epsilon_factor: 1.0
-
-        # every long-range term the module supports
-        use_dipole: true
-        use_quadrupole: true
-        use_induced_charge: true
-        use_induced_dipole: true
-        use_anisotropic_polarizability: true
-        alpha_irreps: "0e+1o+2e"
-        kappa_alpha_positive: true
-        kappa_scale: 0.1
-        alpha_scale: 0.1
-
-        # non-periodic: the real-space Ewald. run_all.sh sets this to null
-        # for the legacy variant
-        is_periodic: false
-        N_max: 10
-
+    _target_: allegro.model.AllegroModel
+    compile_mode: compile
     seed: 456
     model_dtype: float32
     type_names: ${model_type_names}
     r_max: ${cutoff_radius}
-
     radial_chemical_embed:
       _target_: allegro.nn.TwoBodyBesselScalarEmbed
       num_bessels: 8
@@ -122,7 +92,6 @@ training_module:
     scalar_embed_mlp_hidden_layers_depth: 1
     scalar_embed_mlp_hidden_layers_width: ${num_scalar_features}
     scalar_embed_mlp_nonlinearity: silu
-
     l_max: 1
     num_layers: 2
     num_scalar_features: ${num_scalar_features}
@@ -135,12 +104,10 @@ training_module:
     readout_mlp_hidden_layers_depth: 1
     readout_mlp_hidden_layers_width: ${num_scalar_features}
     readout_mlp_nonlinearity: silu
-
     avg_num_neighbors: ${training_data_stats:per_type_num_neighbors_mean}
     per_type_energy_shifts: ${training_data_stats:per_atom_energy_mean}
     per_type_energy_scales: ${training_data_stats:forces_rms}
     per_type_energy_scales_trainable: false
     per_type_energy_shifts_trainable: false
-
 global_options:
   allow_tf32: false

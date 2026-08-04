@@ -1,0 +1,94 @@
+# BEC inference for a trained non-periodic (dipeptide) model.
+#
+# Loads the model out of a checkpoint and runs only the test phase, where
+# ToggleLESCallback turns BEC on and TestTimeXYZFileWriter writes the predictions.
+# The point is that BECs come out without erroring -- accuracy is irrelevant here,
+# the checkpoints come from two-epoch runs.
+#
+# run_bec.sh supplies the two values that are run-specific:
+#   ++training_module.model.checkpoint_path=...
+#   ++trainer.callbacks.0.out_file=predictions/<tag>
+#
+# Follows the maintained BEC test config in
+# https://github.com/ChengUCB/extended_les_fit (MLIPs/NequIP-LES/water/water_bec_test.yaml).
+
+run: [test]
+
+cutoff_radius: 4.0
+model_type_names: [C, H, N, O]
+chemical_species: ${model_type_names}
+
+data:
+  _target_: nequip.data.datamodule.ASEDataModule
+  seed: 456
+  # the training split is still declared: the datamodule and the data statistics
+  # manager are built for every run type, test included
+  split_dataset:
+    - file_path: data/dipep_train.xyz
+      train: 0.5
+      val: 0.5
+  # no reference BECs for the dipeptide set; this only checks that
+  # predicted BECs come out at all
+  test_file_path: data/dipep_test.xyz
+  transforms:
+    - _target_: nequip.data.transforms.ChemicalSpeciesToAtomTypeMapper
+      model_type_names: ${model_type_names}
+    - _target_: nequip.data.transforms.NeighborListTransform
+      r_max: ${cutoff_radius}
+  train_dataloader:
+    _target_: torch.utils.data.DataLoader
+    batch_size: 2
+    num_workers: 0
+    shuffle: true
+  val_dataloader:
+    _target_: torch.utils.data.DataLoader
+    batch_size: 2
+    num_workers: 0
+  test_dataloader: ${data.val_dataloader}
+  stats_manager:
+    _target_: nequip.data.CommonDataStatisticsManager
+    type_names: ${model_type_names}
+    dataloader_kwargs:
+      batch_size: 1
+
+trainer:
+  _target_: lightning.Trainer
+  # CPU by default; run_bec.sh overrides to gpu when CUDA is available
+  accelerator: cpu
+  enable_checkpointing: false
+  logger: false
+  callbacks:
+    # index 0: run_bec.sh overrides out_file per model. No file extension --
+    # the writer appends it.
+    - _target_: nequip.train.callbacks.TestTimeXYZFileWriter
+      out_file: predictions/bec_dipep
+      extra_fields: [LES_q, LES_BEC]         # predicted charges and BECs
+      output_fields_from_original_dataset: [total_energy, forces]
+      chemical_symbols: ${model_type_names}
+    # BEC is off during training and turned on here
+    - _target_: nequip_les.train.callbacks.ToggleLESCallback
+      compute_bec: true
+
+training_module:
+  _target_: nequip.train.EMALightningModule
+  ema_decay: 0.999
+  loss:
+    _target_: nequip.train.EnergyForceLoss
+    per_atom_energy: true
+    coeffs:
+      total_energy: 1.0
+      forces: 1.0
+  val_metrics:
+    _target_: nequip.train.EnergyForceMetrics
+    coeffs:
+      total_energy_mae: 1.0
+      forces_mae: 1.0
+  train_metrics: ${training_module.val_metrics}
+  test_metrics: ${training_module.val_metrics}
+  # the model, LES settings and all, comes from the checkpoint
+  model:
+    _target_: nequip.model.ModelFromCheckpoint
+    checkpoint_path: ???
+
+global_options:
+  allow_tf32: false

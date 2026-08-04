@@ -3,12 +3,13 @@
 #
 # Full-term LES (uQiqiu): dipoles, quadrupoles, induced charges, induced dipoles
 # with an anisotropic polarizability. Model and schedule are deliberately tiny --
-# this checks that everything runs and that BEC inference works, not accuracy.
+# this checks that training runs at all, not accuracy. BEC inference is a
+# separate step -- see run_bec.sh, which reuses the trained checkpoint.
 #
 # One of the 12 configurations run by run_all.sh; the LES settings are
 # written out explicitly rather than overridden on the command line.
 
-run: [train, test]
+run: [train]
 
 cutoff_radius: 4.0
 num_layers: 2
@@ -34,12 +35,12 @@ data:
       r_max: ${cutoff_radius}
   train_dataloader:
     _target_: torch.utils.data.DataLoader
-    batch_size: 1
+    batch_size: 2
     num_workers: 0
     shuffle: true
   val_dataloader:
     _target_: torch.utils.data.DataLoader
-    batch_size: 1
+    batch_size: 2
     num_workers: 0
   test_dataloader: ${data.val_dataloader}
   stats_manager:
@@ -60,19 +61,6 @@ trainer:
   logger:
     _target_: lightning.pytorch.loggers.CSVLogger
     save_dir: .
-  callbacks:
-    # index 0: run_all.sh overrides out_file so the 12 runs do not overwrite
-    # each other. No file extension -- the writer appends it.
-    - _target_: nequip.train.callbacks.TestTimeXYZFileWriter
-      out_file: predictions/nequip_dipep_compiled
-      extra_fields: [LES_q, LES_BEC]         # predicted charges and BECs
-      output_fields_from_original_dataset: [total_energy, forces]
-      chemical_symbols: ${model_type_names}
-    # turns BEC on for the test phase only, so `run: [train, test]` also
-    # exercises BEC inference
-    - _target_: nequip_les.train.callbacks.ToggleLESCallback
-      compute_bec: true
-
 training_module:
   _target_: nequip.train.EMALightningModule
   ema_decay: 0.999
