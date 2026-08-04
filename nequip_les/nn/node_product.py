@@ -1,4 +1,6 @@
 # This file is a part of the `nequip-les` package. Please see LICENSE and README at the root for information on using it.
+from typing import Optional
+
 import torch
 from e3nn import o3
 from e3nn.io import CartesianTensor
@@ -78,13 +80,16 @@ class NodeAssembleTensor(GraphModuleMixin, torch.nn.Module):
         pos = data[AtomicDataDict.POSITIONS_KEY]
         eye = torch.eye(3, device=pos.device, dtype=pos.dtype)
 
-        result = None
+        result: Optional[torch.Tensor] = None
         if self.scalar_field is not None:
             scalar = data[self.scalar_field]  # [N, 1]
             result = scalar.view(-1, 1, 1) * eye.unsqueeze(0)  # [N, 3, 3]
         for field in self.contrib_fields:
             contrib = data[field]
-            result = contrib if result is None else result + contrib
+            if result is None:
+                result = contrib
+            else:
+                result = result + contrib
 
         if result is not None:
             if self.traceless:

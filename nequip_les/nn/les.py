@@ -54,6 +54,17 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
         self._warned_missing_cell = False
 
 
+    @torch.jit.ignore
+    def _warn_missing_cell(self) -> None:
+        """Warn once that no cell was supplied. Eager only -- see forward."""
+        if self._warned_missing_cell:
+            return
+        self._warned_missing_cell = True
+        logging.getLogger(__name__).warning(
+            "LES received no cell; treating the system as non-periodic. "
+            "If the system is periodic, use a deployment target that passes the cell."
+        )
+
     def forward(self, data: AtomicDataDict.Type) -> AtomicDataDict.Type:
 
         q = data[self.field]
@@ -75,13 +86,11 @@ class LatentEwaldSum(GraphModuleMixin, torch.nn.Module):
                     "(pair_nequip, ASE), or set is_periodic: false for a genuinely "
                     "non-periodic system."
                 )
-            if not self._warned_missing_cell:
-                self._warned_missing_cell = True
-                logging.getLogger(__name__).warning(
-                    "LES received no cell; treating the system as non-periodic. "
-                    "If the system is periodic, use a deployment target that "
-                    "passes the cell."
-                )
+            # the warning lives in a jit-ignored helper: TorchScript cannot compile a
+            # logging call, and this branch is on the scripted path (LAMMPS
+            # pair_nequip is exported with --mode torchscript on torch < 2.10)
+            if not torch.jit.is_scripting():
+                self._warn_missing_cell()
             cell = torch.zeros((AtomicDataDict.num_frames(data), 3, 3),
                                device=pos.device, dtype=pos.dtype)
 
