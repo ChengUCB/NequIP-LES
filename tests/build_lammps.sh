@@ -95,17 +95,33 @@ fi
 # Kokkos needs the exact GPU architecture; getting it wrong costs a full rebuild.
 KOKKOS_ARCH=""
 if command -v nvidia-smi >/dev/null; then
-    CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '. ')
-    case "$CC" in
+    # NB: not named CC -- that is the C compiler variable, which the compiler module exports
+    GPU_CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '. ')
+    case "$GPU_CC" in
         70) KOKKOS_ARCH=VOLTA70 ;;  75) KOKKOS_ARCH=TURING75 ;;
         80) KOKKOS_ARCH=AMPERE80 ;; 86) KOKKOS_ARCH=AMPERE86 ;;
         89) KOKKOS_ARCH=ADA89 ;;    90) KOKKOS_ARCH=HOPPER90 ;;
-        100|103|120) KOKKOS_ARCH=BLACKWELL${CC} ;;
+        100|103|120) KOKKOS_ARCH=BLACKWELL${GPU_CC} ;;
     esac
-    echo "  GPU              : $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1) (cc $CC)"
+    echo "  GPU              : $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1) (cc $GPU_CC)"
     echo "  Kokkos arch      : ${KOKKOS_ARCH:-<unmapped; set KOKKOS_ARCH_OVERRIDE=>}"
 fi
 KOKKOS_ARCH="${KOKKOS_ARCH_OVERRIDE:-$KOKKOS_ARCH}"
+
+# Compiling needs no GPU -- nvcc runs on the CPU -- so building on a big CPU node is fine and
+# usually faster. But then nvidia-smi is absent and the architecture cannot be detected, and
+# silently dropping CUDA would hand back a CPU-only lmp after an hour of compiling. Ask instead.
+require_kokkos_arch() {
+    [[ -n "$KOKKOS_ARCH" ]] && return 0
+    echo
+    echo "  Kokkos GPU architecture unknown (no nvidia-smi on this node?)."
+    echo "  Compiling does not need a GPU, but the architecture must be stated:"
+    echo "      KOKKOS_ARCH_OVERRIDE=HOPPER90 $0 $MODE $PREFIX     # H100"
+    echo "      KOKKOS_ARCH_OVERRIDE=AMPERE80 ...                  # A100"
+    echo "      KOKKOS_ARCH_OVERRIDE=AMPERE86 ...                  # A40"
+    echo "  Or build on the GPU node, where it is detected."
+    die "refusing to build a CPU-only lmp by accident"
+}
 
 if [[ "$MODE" == check ]]; then
     echo
@@ -153,17 +169,21 @@ if [[ "$MODE" == pair ]]; then
         # two "mutually exclusive", which is about which one you use at run time, not about
         # what may be compiled in.
         FLAGS+=(-DPKG_KOKKOS=ON -DPKG_OPENMP=yes -DKokkos_ENABLE_OPENMP=ON)
-        if [[ -n "$KOKKOS_ARCH" && "$NVCC_CUDA" != none ]]; then
+        if [[ "$NVCC_CUDA" != none ]]; then
+            require_kokkos_arch
             # Kokkos CUDA needs nvcc_wrapper as the C++ compiler, as the nequip ML-IAP docs
             # spell out for the same kind of build
             FLAGS+=(-DKokkos_ENABLE_CUDA=ON "-DKokkos_ARCH_${KOKKOS_ARCH}=ON"
                     -DCMAKE_CXX_COMPILER="$SRC/lib/kokkos/bin/nvcc_wrapper")
+        else
+            echo "  no nvcc: building Kokkos for CPU only"
         fi
     else
         echo "  KOKKOS=off: building without Kokkos. The pair styles still run the model on"
         echo "  the GPU through libtorch; only the LAMMPS-side acceleration is missing."
     fi
 
+    rm -f "$SRC/build/CMakeCache.txt"
     cmake -B "$SRC/build" -S "$SRC/cmake" "${FLAGS[@]}" ${CMAKE_EXTRA:-} \
         || die "cmake configure failed"
 
@@ -209,8 +229,10 @@ if [[ "$MODE" == mliap ]]; then
         -DPKG_PYTHON=ON
         -DBUILD_SHARED_LIBS=ON
     )
-    [[ -n "$KOKKOS_ARCH" ]] && FLAGS+=("-DKokkos_ARCH_${KOKKOS_ARCH}=ON")
+    require_kokkos_arch
+    FLAGS+=("-DKokkos_ARCH_${KOKKOS_ARCH}=ON")
 
+    rm -f "$SRC/build-mliap/CMakeCache.txt"
     cmake -B "$SRC/build-mliap" -S "$SRC/cmake" "${FLAGS[@]}" ${CMAKE_EXTRA:-} \
         || die "cmake configure failed"
 
