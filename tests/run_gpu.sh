@@ -39,24 +39,39 @@ echo "torch $("$PY" -c 'import torch; print(torch.__version__)')  |  $("$PY" -c 
 
 # Which kernel modifiers can we exercise? The names differ per backbone: nequip
 # swaps whole tensor products, Allegro swaps its contracter.
-NEQUIP_MODS=(); ALLEGRO_MODS=()
+# Which kernel modifiers can we exercise? The names differ per backbone, and the docs
+# are explicit about which ones work at training time:
+#   enable_OpenEquivariance          nequip   train + inference
+#   enable_CuEquivariance            nequip   inference only (training is WIP)
+#   enable_CuEquivarianceContracter  allegro  train + inference
+#   enable_TritonContracter          allegro  inference only
+NEQUIP_INFER_MODS=(); NEQUIP_TRAIN_MODS=()
+ALLEGRO_INFER_MODS=(); ALLEGRO_TRAIN_MODS=()
 if "$PY" -c "import openequivariance" 2>/dev/null; then
-    NEQUIP_MODS+=(enable_OpenEquivariance)
+    NEQUIP_INFER_MODS+=(enable_OpenEquivariance)
+    NEQUIP_TRAIN_MODS+=(enable_OpenEquivariance)
 fi
 if "$PY" -c "import cuequivariance_torch" 2>/dev/null; then
-    NEQUIP_MODS+=(enable_CuEquivariance)
-    ALLEGRO_MODS+=(enable_CuEquivarianceContracter)
+    NEQUIP_INFER_MODS+=(enable_CuEquivariance)
+    ALLEGRO_INFER_MODS+=(enable_CuEquivarianceContracter)
+    ALLEGRO_TRAIN_MODS+=(enable_CuEquivarianceContracter)
 fi
 if "$PY" -c "import triton" 2>/dev/null; then
-    ALLEGRO_MODS+=(enable_TritonContracter)     # triton ships with torch
+    ALLEGRO_INFER_MODS+=(enable_TritonContracter)   # triton ships with torch
 fi
-echo "nequip modifiers : ${NEQUIP_MODS[*]:-(none installed)}"
-echo "allegro modifiers: ${ALLEGRO_MODS[*]:-(none installed)}"
+echo "nequip  modifiers: infer=[${NEQUIP_INFER_MODS[*]:-none}] train=[${NEQUIP_TRAIN_MODS[*]:-none}]"
+echo "allegro modifiers: infer=[${ALLEGRO_INFER_MODS[*]:-none}] train=[${ALLEGRO_TRAIN_MODS[*]:-none}]"
 
-mods_for() {   # $1 tag -> echoes the modifier names that apply to it
+mods_for() {         # $1 tag -> modifiers valid when EXPORTING it
     case "$1" in
-        nequip_*)  echo "${NEQUIP_MODS[*]:-}" ;;
-        allegro_*) echo "${ALLEGRO_MODS[*]:-}" ;;
+        nequip_*)  echo "${NEQUIP_INFER_MODS[*]:-}" ;;
+        allegro_*) echo "${ALLEGRO_INFER_MODS[*]:-}" ;;
+    esac
+}
+train_mods_for() {   # $1 tag -> modifiers valid when TRAINING with it
+    case "$1" in
+        nequip_*)  echo "${NEQUIP_TRAIN_MODS[*]:-}" ;;
+        allegro_*) echo "${ALLEGRO_TRAIN_MODS[*]:-}" ;;
     esac
 }
 
@@ -132,7 +147,7 @@ export_ckpt() {   # $1 ckpt, $2 row, $3 target, $4 mode, $5... extra nequip-comp
 }
 
 # ---------------------------------------------------------------------------
-# 1. plain CUDA: train both LES paths, then export for ASE and for LAMMPS
+# 1. plain CUDA: train both LES paths, package, then export for ASE and for LAMMPS
 # ---------------------------------------------------------------------------
 # both periodicities: a periodic model is rejected by pair_allegro (no cell), so
 # Allegro's LAMMPS pair style can only be exercised by the non-periodic ones
@@ -145,6 +160,14 @@ for tag in nequip_water_eager nequip_water_compiled nequip_dipep_eager nequip_di
     CK=$(train_gpu "$tag") || { FAILED+=("$tag/train"); continue; }
     PASSED+=("$tag/train/cuda")
     printf '  %-60s ok\n' "$tag/train/cuda"
+
+    # a portable model file, independent of the source tree; this broke once because a
+    # LES module imported the e3nn package roots and dragged sympy into torch.package
+    if ! row_skipped "$tag/package"; then
+        log="compiled/${tag}_package.log"
+        nequip-package build "$CK" "compiled/${tag}.nequip.zip" > "$log" 2>&1
+        record "$tag/package" $? "$log"
+    fi
 
     if [[ "$tag" == nequip_* ]]; then pair=pair_nequip; else pair=pair_allegro; fi
     # pair_allegro declares no cell, so a periodic model there is a rejection case
@@ -159,16 +182,21 @@ for tag in nequip_water_eager nequip_water_compiled nequip_dipep_eager nequip_di
         export_ckpt "$CK" "$tag/ase/$mode/cuda/tf32" ase "$mode" --tf32
     done
 
-    # LAMMPS ML-IAP is not a --target: it has its own CLI, and needs LAMMPS built with
-    # ML-IAP in this environment
-    if ! row_skipped "$tag/mliap" ; then
-        if "$PY" -c "import lammps" 2>/dev/null; then
-            log="compiled/${tag}_mliap.log"
-            nequip-prepare-lmp-mliap "$CK" "compiled/${tag}.nequip.lmp.pt" > "$log" 2>&1
-            record "$tag/mliap/cuda" $? "$log"
-        else
-            printf '  %-60s skipped (no LAMMPS ML-IAP in this env)\n' "$tag/mliap/cuda"
-        fi
+    # LAMMPS ML-IAP is not a --target: it has its own CLI (nequip-prepare-lmp-mliap),
+    # takes the same --modifiers, and needs LAMMPS built with ML-IAP in this env
+    if "$PY" -c "import lammps" 2>/dev/null; then
+        mliap() {   # $1 row suffix, $2... extra args
+            local suffix="$1"; shift
+            row_skipped "$tag/mliap$suffix" && return 0
+            local name="${tag}_mliap${suffix//\//_}"
+            nequip-prepare-lmp-mliap "$CK" "compiled/${name}.nequip.lmp.pt" "$@" \
+                > "compiled/${name}.log" 2>&1
+            record "$tag/mliap$suffix" $? "compiled/${name}.log"
+        }
+        mliap ""
+        for mod in $(mods_for "$tag"); do mliap "/$mod" --modifiers "$mod"; done
+    else
+        printf '  %-60s skipped (no LAMMPS ML-IAP in this env)\n' "$tag/mliap"
     fi
 
     # ---- accelerations, on every target that matters for inference ----
@@ -186,7 +214,7 @@ done
 #    different code path from exporting an already-trained checkpoint
 # ---------------------------------------------------------------------------
 for tag in nequip_water_eager allegro_water_eager; do
-    for mod in $(mods_for "$tag"); do
+    for mod in $(train_mods_for "$tag"); do
         row="$tag+$mod/train/cuda"
         row_skipped "$row" && continue
         printf '\n=== %s ===\n' "$row"

@@ -138,6 +138,19 @@ for tag in nequip_water_eager nequip_water_compiled nequip_dipep_eager nequip_di
     printf '\n=== %s ===\n' "$tag"
     CK=$(train_once "$tag") || { FAILED+=("$tag/train"); continue; }
 
+    # a portable model file, independent of the source tree. Checked here because it
+    # broke once for LES models: a LES module imported the e3nn package roots, which
+    # dragged sympy into torch.package's dependency graph and made packaging refuse.
+    if [[ -z "$FILTER" || "$tag/package" == *"$FILTER"* ]]; then
+        pkg="compiled/${tag}.nequip.zip"; plog="compiled/${tag}_package.log"
+        if nequip-package build "$CK" "$pkg" > "$plog" 2>&1 && [[ -s "$pkg" ]]; then
+            printf '  %-52s packaged\n' "$tag/package"; PASSED+=("$tag/package")
+        else
+            printf '  %-52s FAILED (%s)\n' "$tag/package" "$plog"; FAILED+=("$tag/package")
+            grep -iE "error|did not match" "$plog" | head -2 | sed 's/^/        /'
+        fi
+    fi
+
     # ASE always passes the cell, so it works for periodic and non-periodic alike
     targets=(ase)
     # the LAMMPS pair style follows the backbone
