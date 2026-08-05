@@ -22,8 +22,8 @@ for the multipole heads that feed it -- but you write them all in the same place
 |---|---|---|
 | `is_periodic` | `None` | Which Ewald implementation and which boundary condition. `true` = periodic, `false` = isolated, `None` = the legacy implementation, which decides per structure. **Set it explicitly** -- see [Ewald implementations](ewald.md). |
 | `sigma` | `1.0` | Width (Å) of the Gaussian each latent charge is smeared over. It sets how far the electrostatics reach before the short-range model takes over; also the Ewald splitting parameter. |
-| `dl` | `2.0` | Reciprocal-space resolution (Å). Smaller `dl` = more k-vectors = more accurate and slower. |
-| `N_max` | `10` | Cap on k-vectors per direction. Keep `N_max * dl` above your cell's longest side, otherwise the sum is truncated before it converges. Periodic only. |
+| `dl` | `2.0` | Resolution of the reciprocal-space sum, in Å: it sets the cutoff on the k-vector magnitude, `k_max = 2*pi/dl`, so it is the shortest real-space wavelength kept. Smaller `dl` = more k-vectors = more accurate. |
+| `N_max` | `10` | Extent of the integer k-grid, `n` in `[-N_max, N_max]` per direction. It must be large enough for the `dl` cutoff sphere to fit: keep `N_max * dl` above your cell's longest side, otherwise the sum is truncated before it converges. Periodic only. |
 | `remove_self_interaction` | `True` | Subtract each charge's interaction with its own Gaussian. Leave on: it is a constant offset, not physics. |
 | `use_epsilon_r_scaling` | `False` | Learn a dielectric-screening factor that rescales the electrostatic energy. |
 
@@ -69,5 +69,9 @@ so seeing them next to `sigma` in an example config is not a sign they change tr
 The defaults (`sigma: 1.0`, `dl: 2.0`) work for the systems in the papers and are a
 reasonable starting point. If you change them, change `sigma` for physics (how far the
 long-range part should reach relative to your cutoff) and `dl`/`N_max` for numerics
-(convergence of the sum). Increasing accuracy through `dl` shows up directly in runtime,
-since the number of k-vectors grows as `1/dl^3`.
+(convergence of the sum).
+
+`N_max` is the one that costs you time. The implementation builds the full
+`(2*N_max + 1)^3` grid of integer k-vectors and masks the ones outside the `dl` cutoff, so
+runtime grows with `N_max^3` while `dl` only decides how many of those vectors contribute.
+Raise `N_max` to what your cell needs and no further.

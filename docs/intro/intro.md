@@ -17,6 +17,8 @@ Because the charges are a differentiable function of the positions, quantities t
 from them come for free -- most usefully the **Born effective charges** (BEC), obtained by
 differentiating the polarization with respect to atomic positions.
 
+[How LES works](../les/theory.md) goes through this in more detail.
+
 ## When you want it
 
 * systems where long-range electrostatics matter: electrolytes, interfaces, charged
@@ -26,9 +28,24 @@ differentiating the polarization with respect to atomic positions.
 
 For a purely short-range problem the extra cost buys nothing -- use plain NequIP or Allegro.
 
-## Papers
+## What this package is
 
-* LES: [arXiv:2504.15925](https://arxiv.org/abs/2504.15925)
-* Multipole extension (dipoles, quadrupoles, polarizabilities): [arXiv:2605.05746](https://arxiv.org/abs/2605.05746)
+[LES](https://github.com/ChengUCB/les) is a standalone library, plugged into a number of
+MLIPs (MACE, CACE, MatGL, ...). **NequIP-LES** is the plug-in for the NequIP framework: it
+wires LES into [NequIP](https://github.com/mir-group/nequip) and
+[Allegro](https://github.com/mir-group/allegro) models, adds the equivariant heads that
+predict the multipoles, and makes the whole thing trainable, compilable and deployable
+through the ordinary NequIP tooling.
 
-See the [repository README](https://github.com/ChengUCB/NequIP-LES) for the citation entries.
+Everything that is not LES-specific -- data, training, loss, metrics, LAMMPS, ASE -- is the
+NequIP framework, documented [here](https://nequip.readthedocs.io). This site covers the
+LES part and links out for the rest.
+
+## Where to go next
+
+* [Usage](../guide/usage.md) -- turning a NequIP or Allegro config into a LES one
+* [`les_args` reference](../guide/les_args.md) -- every option, with defaults
+* [Ewald implementations](../guide/ewald.md) -- vectorized vs legacy, and what compilation needs
+* [What works](../guide/deployment.md) -- capability tables for compilation, deployment, accelerations
+* [How LES works](../les/theory.md) -- the method, and the library on its own
+* [Citation](../citation.md)

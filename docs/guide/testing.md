@@ -40,9 +40,10 @@ target and mode, plus `nequip-package`. Two rows are expected to *fail*: periodi
 a failure, same as a broken export.
 
 **`run_gpu.sh` -- GPU only.** The same exports with each acceleration modifier, split into
-train-time and inference-time lists because some modifiers are inference-only. Also packaging
-and the ML-IAP interface file. `ROWS=...` filters to a subset, which is useful when only the
-accelerations changed.
+train-time and inference-time lists because some modifiers are inference-only. Also packaging,
+TF32 exports, and the ML-IAP interface file. `ROWS=...` filters to a subset, which is useful
+when only the accelerations changed. 70 rows in total; the last full run was clean on an
+NVIDIA A40 with torch 2.13.0+cu130, with ML-IAP skipped for lack of a LAMMPS build.
 
 **`test_nequip.sh` / `test_allegro.sh` -- one model, every path.** Given a checkpoint, walks
 through all eleven deployment steps in order -- package, ASE, LAMMPS pair style, batch,

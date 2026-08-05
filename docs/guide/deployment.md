@@ -55,7 +55,10 @@ with LES, which the test suite checks:
 | `enable_CuEquivarianceContracter` | Allegro | ✅ | ✅ |
 | `enable_TritonContracter` | Allegro | ❌ | ✅ |
 
-The ❌ entries are the upstream packages' own limitation, not a LES one.
+The ❌ entries are the upstream packages' own limitation -- those two are inference-only --
+not a LES one. Every ✅ above is exercised on GPU by `run_gpu.sh`: the inference column as an
+export with the modifier applied, the training column as a training run with the model wrapped
+in `nequip.model.modify`.
 
 `nequip-compile` takes its positional arguments first, because `--modifiers` accepts a list
 and would otherwise swallow them:
@@ -73,7 +76,7 @@ nequip-compile model.ckpt out.nequip.pt2 \
 | < 2.10 | `--mode torchscript` available |
 | 2.9.1 | recommended for GPU `compile_mode: compile` |
 | 2.12 | GPU train-time compilation broken (a `silu_backward` bug, unrelated to LES; fixed in 2.13) |
-| 2.13 | `nequip-compile` fails on CUDA unless TF32 is worked around, below |
+| 2.13 | `nequip-compile` fails on CUDA unless TF32 is worked around, below; with that in place the whole GPU suite passes |
 
 ### The TF32 workaround
 
@@ -91,6 +94,19 @@ python tests/compile_tf32fix.py model.ckpt out.nequip.pt2 \
 ```
 
 Nothing about the model or about nequip's TF32 setting changes.
+
+## What has actually been tested
+
+The tables above are not aspirational -- with the exception of the ❓ row, every entry is a
+row in the [test suite](testing.md). The most recent full GPU run:
+
+* **NVIDIA A40, torch 2.13.0+cu130** -- 70 rows, 0 failures. Both backbones × both systems
+  (periodic water, isolated dipeptide) × both training paths (eager, compiled), each one
+  trained, packaged, exported to its applicable targets, exported again with TF32, and
+  exported once per acceleration modifier; plus two training runs with a modifier applied.
+* ML-IAP was skipped throughout: no LAMMPS ML-IAP build in that environment. This is the one
+  ❓ in the capability table, and the only claim on this page that rests on the documentation
+  rather than on a run of our own.
 
 ## Known gap
 
