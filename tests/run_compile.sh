@@ -69,6 +69,16 @@ export NEQUIP_FLOAT64_MODEL_TOL="${NEQUIP_FLOAT64_MODEL_TOL:-1e-6}"
 # normalises the flags first; see its docstring.
 NEQUIP_COMPILE=("$PY" compile_tf32fix.py)
 
+# Which --target values does this environment actually offer? `pair_allegro` is
+# registered by the allegro package through the `nequip.extension` entry point, so it is
+# missing whenever allegro is installed without its metadata -- skip those rows instead
+# of failing them.
+TARGETS=$("$PY" -c "
+from nequip.scripts._compile_utils import COMPILE_TARGET_DICT as d
+print(' '.join(sorted(d)))" 2>/dev/null)
+echo "available --target values: ${TARGETS:-<could not query>}"
+has_target() { [[ " $TARGETS " == *" $1 "* ]]; }
+
 mkdir -p ckpt compiled
 PASSED=(); FAILED=()
 

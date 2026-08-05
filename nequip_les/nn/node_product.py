@@ -2,8 +2,8 @@
 from typing import Optional
 
 import torch
-from e3nn import o3
-from e3nn.io import CartesianTensor
+from e3nn.o3._irreps import Irreps
+from e3nn.io._cartesian_tensor import CartesianTensor
 from nequip.data import AtomicDataDict
 from nequip.nn import GraphModuleMixin
 

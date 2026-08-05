@@ -1,8 +1,8 @@
 # This file is a part of the `nequip-les` package. Please see LICENSE and README at the root for information on using it.
 import torch
 from math import sqrt as msqrt
-from e3nn import o3
-from e3nn.io import CartesianTensor
+from e3nn.o3._irreps import Irreps
+from e3nn.io._cartesian_tensor import CartesianTensor
 from nequip.data import AtomicDataDict
 from nequip.nn import GraphModuleMixin, scatter, AvgNumNeighborsNorm
 
@@ -20,7 +20,7 @@ class EdgeDipoleProduct(GraphModuleMixin, torch.nn.Module):
 
         self._init_irreps(
             irreps_in=irreps_in,
-            irreps_out={self.out_field: o3.Irreps("1o")}
+            irreps_out={self.out_field: Irreps("1o")}
         )
 
     def forward(self, data: AtomicDataDict.Type) -> AtomicDataDict.Type:

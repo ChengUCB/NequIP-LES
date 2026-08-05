@@ -80,6 +80,16 @@ export NEQUIP_FLOAT64_MODEL_TOL="${NEQUIP_FLOAT64_MODEL_TOL:-1e-6}"
 # normalises the flags first; see its docstring.
 NEQUIP_COMPILE=("$PY" compile_tf32fix.py)
 
+# Which --target values does this environment actually offer? `pair_allegro` is
+# registered by the allegro package through the `nequip.extension` entry point, so it is
+# missing whenever allegro is installed without its metadata -- skip those rows instead
+# of failing them.
+TARGETS=$("$PY" -c "
+from nequip.scripts._compile_utils import COMPILE_TARGET_DICT as d
+print(' '.join(sorted(d)))" 2>/dev/null)
+echo "available --target values: ${TARGETS:-<could not query>}"
+has_target() { [[ " $TARGETS " == *" $1 "* ]]; }
+
 mkdir -p ckpt compiled
 PASSED=(); FAILED=()
 
@@ -147,15 +157,24 @@ for tag in nequip_water_eager nequip_water_compiled nequip_dipep_eager nequip_di
         [[ "$skip_pair" == no ]] && export_ckpt "$CK" "$tag/$pair/$mode/cuda" "$pair" "$mode"
         # TF32 changes float32 arithmetic and the Ewald k-space sum is sensitive to it
         export_ckpt "$CK" "$tag/ase/$mode/cuda/tf32" ase "$mode" --tf32
-        # LAMMPS ML-IAP: a packaging path of its own, separate from the pair styles
-        export_ckpt "$CK" "$tag/mliap/$mode/cuda" lammps_mliap "$mode"
     done
+
+    # LAMMPS ML-IAP is not a --target: it has its own CLI, and needs LAMMPS built with
+    # ML-IAP in this environment
+    if ! row_skipped "$tag/mliap" ; then
+        if "$PY" -c "import lammps" 2>/dev/null; then
+            log="compiled/${tag}_mliap.log"
+            nequip-prepare-lmp-mliap "$CK" "compiled/${tag}.nequip.lmp.pt" > "$log" 2>&1
+            record "$tag/mliap/cuda" $? "$log"
+        else
+            printf '  %-60s skipped (no LAMMPS ML-IAP in this env)\n' "$tag/mliap/cuda"
+        fi
+    fi
 
     # ---- accelerations, on every target that matters for inference ----
     for mod in $(mods_for "$tag"); do
         for mode in "${MODES[@]}"; do
             export_ckpt "$CK" "$tag/ase/$mode/cuda/$mod" ase "$mode" --modifiers "$mod"
-            export_ckpt "$CK" "$tag/mliap/$mode/cuda/$mod" lammps_mliap "$mode" --modifiers "$mod"
             [[ "$skip_pair" == no ]] && \
                 export_ckpt "$CK" "$tag/$pair/$mode/cuda/$mod" "$pair" "$mode" --modifiers "$mod"
         done
