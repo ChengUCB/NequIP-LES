@@ -186,6 +186,8 @@ for tag in nequip_water_eager nequip_water_compiled nequip_dipep_eager nequip_di
 
     for mode in "${MODES[@]}"; do
         export_ckpt "$CK" "$tag/ase/$mode/cuda" ase "$mode"
+        # torch-sim loads the batched target, not the ase one
+        export_ckpt "$CK" "$tag/batch/$mode/cuda" batch "$mode"
         [[ "$skip_pair" == no ]] && export_ckpt "$CK" "$tag/$pair/$mode/cuda" "$pair" "$mode"
         # TF32 changes float32 arithmetic and the Ewald k-space sum is sensitive to it
         export_ckpt "$CK" "$tag/ase/$mode/cuda/tf32" ase "$mode" --tf32

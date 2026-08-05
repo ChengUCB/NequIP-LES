@@ -20,6 +20,7 @@ module, every row in the compilation table is ❌.
 | `nequip-compile --mode torchscript` | ⚠️ | torch < 2.10 only (nequip refuses above) |
 | BEC inference from a compile-trained model | ❌ | output keys are fixed at trace time |
 | BEC inference from an eager checkpoint | ✅ | |
+| reading `LES_q` / `LES_BEC` from a deployed model | ❌ | the targets export energies and forces only -- see below |
 | mixed periodic + isolated dataset | ❌ | legacy module only, and then no compilation |
 | LAMMPS ML-IAP (`nequip-prepare-lmp-mliap`) | ❓ | not yet verified against a LAMMPS build |
 | CPU / CUDA | ✅ / ✅ | compilation works on both |
@@ -39,6 +40,29 @@ Non-periodic models export to `pair_allegro` normally. Under `--mode torchscript
 also succeeds for periodic models, because TorchScript compiles the source without running
 the branch that raises -- the guard is compiled into the artefact and fires when LAMMPS calls
 it. `--target ase` always passes a cell and is unaffected.
+
+## Latent charges are not in a deployed model
+
+`nequip-compile` fixes what a compiled artefact returns, per target:
+
+| target | exported outputs |
+|---|---|
+| `pair_nequip`, `pair_allegro` | per-atom energy, forces, virial |
+| `ase`, `batch` | per-atom energy, total energy, forces, stress |
+
+`LES_q` is not on either list, so a deployed model gives you energies and forces and nothing
+else. `LES_BEC` is further out of reach: it is not even computed unless BEC is switched on.
+
+This matters because LAMMPS otherwise looks like it can reach them. `pair_nequip_allegro`
+provides a [`compute`](https://github.com/mir-group/pair_nequip_allegro/tree/main/compute)
+that pulls an arbitrary key out of the model's returned dictionary --
+`compute q all nequip/atom LES_q 1 0` reads exactly right. But the key has to be in the
+dictionary the *compiled* model returns, and it is not.
+
+So: get latent charges and BECs during **training or testing**, from the checkpoint, using the
+callbacks in [Usage](usage.md#predicted-charges-and-becs). They are not available from a
+LAMMPS or ASE deployment. Lifting this would mean adding the LES keys to the target output
+lists in nequip.
 
 ## Accelerations
 

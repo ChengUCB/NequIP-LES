@@ -151,8 +151,9 @@ for tag in nequip_water_eager nequip_water_compiled nequip_dipep_eager nequip_di
         fi
     fi
 
-    # ASE always passes the cell, so it works for periodic and non-periodic alike
-    targets=(ase)
+    # ASE always passes the cell, so it works for periodic and non-periodic alike;
+    # `batch` is what torch-sim loads
+    targets=(ase batch)
     # the LAMMPS pair style follows the backbone
     if [[ "$tag" == nequip_* ]]; then targets+=(pair_nequip); else targets+=(pair_allegro); fi
 
