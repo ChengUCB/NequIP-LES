@@ -22,9 +22,11 @@
 # issue and not LES-specific (see README).
 #
 # Usage:
-#   ./run_gpu.sh              # everything available
-#   ./run_gpu.sh nequip       # only rows matching "nequip"
-#   KEEP_OUTPUTS=1 ./run_gpu.sh
+#   ./run_gpu.sh                        # everything available
+#   ./run_gpu.sh nequip                 # only models whose tag contains "nequip"
+#   ROWS=enable_ ./run_gpu.sh           # only the acceleration rows
+#   ROWS=mliap ./run_gpu.sh             # only the ML-IAP rows
+#   KEEP_OUTPUTS=1 ./run_gpu.sh         # keep checkpoints, so a rerun reuses them
 set -uo pipefail
 cd "$(dirname "$0")"
 
@@ -108,8 +110,13 @@ has_target() { [[ " $TARGETS " == *" $1 "* ]]; }
 mkdir -p ckpt compiled
 PASSED=(); FAILED=()
 
-row_skipped() {   # $1 row -> 0 when the filter excludes it
-    [[ -n "$FILTER" && "$1" != *"$FILTER"* ]]
+row_skipped() {   # $1 row -> 0 when this row is excluded
+    [[ -n "$FILTER" && "$1" != *"$FILTER"* ]] && return 0
+    # ROWS narrows to individual rows regardless of the model filter, e.g.
+    #   ROWS=enable_ ./run_gpu.sh          only the acceleration rows
+    #   ROWS=mliap   ./run_gpu.sh          only the ML-IAP rows
+    [[ -n "${ROWS:-}" && "$1" != *"${ROWS}"* ]] && return 0
+    return 1
 }
 
 record() {   # $1 row, $2 rc, $3 log
@@ -141,8 +148,10 @@ export_ckpt() {   # $1 ckpt, $2 row, $3 target, $4 mode, $5... extra nequip-comp
     local name; name=$(echo "$row" | tr '/ ' '__')
     local ext=pt2; [[ "$mode" == torchscript ]] && ext=pth
     local log="compiled/$name.log"
-    "${NEQUIP_COMPILE[@]}" --mode "$mode" --device cuda --target "$target" "$@" \
-        "$ck" "compiled/$name.nequip.$ext" > "$log" 2>&1
+    # positionals FIRST, as the docs show: `--modifiers` takes nargs="+" and would
+    # otherwise swallow the input and output paths
+    "${NEQUIP_COMPILE[@]}" "$ck" "compiled/$name.nequip.$ext" \
+        --mode "$mode" --device cuda --target "$target" "$@" > "$log" 2>&1
     record "$row" $? "$log"
 }
 

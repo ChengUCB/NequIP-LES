@@ -104,8 +104,8 @@ check() {   # $1 ckpt, $2 model tag, $3 target, $4 mode, $5 device, $6 expect(pa
     local ext=pt2; [[ "$mode" == torchscript ]] && ext=pth
     local out="compiled/${tag}_${target}_${mode}_${dev}.nequip.$ext"
     local log="compiled/${tag}_${target}_${mode}_${dev}.log"
-    "${NEQUIP_COMPILE[@]}" --mode "$mode" --device "$dev" --target "$target" \
-        "$ck" "$out" > "$log" 2>&1
+    "${NEQUIP_COMPILE[@]}" "$ck" "$out" \
+        --mode "$mode" --device "$dev" --target "$target" > "$log" 2>&1
     local rc=$?
 
     if [[ "$expect" == reject ]]; then
