@@ -144,7 +144,7 @@ def main():
             continue
 
         species = engines.type_names(ckpt)
-        allegro = engines.is_allegro(ckpt)
+        allegro = engines.backbone(ckpt)[0] == "allegro"
         struct = structure_for(tag, args.structure)
         atoms = read(struct, index=0)
         n = len(atoms)
@@ -192,8 +192,7 @@ def main():
             lines = engines.lammps_mliap_lines(path.resolve(), species)
             wd = compiled / "run" / tag / label.replace("/", "_")
             attempt(label, lambda l=lines, w=wd: engines.eval_lammps(lmp_mliap, atoms, species, w, l,
-                                             engines.MLIAP_KOKKOS_ARGS,
-                                             newton="on")[:2],
+                                             engines.MLIAP_KOKKOS_ARGS)[:2],
                     bool(extra))
 
         if art["package"] and not args.no_package:

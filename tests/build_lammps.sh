@@ -92,6 +92,18 @@ if [[ "$TORCH_CUDA" != none && "$NVCC_CUDA" != none ]]; then
 fi
 [[ -n "${FORCE:-}" ]] && echo "  (FORCE=1 set: CUDA checks are advisory)"
 
+# pair_nequip_allegro.cpp calls MPI_Comm_split_type() unconditionally, and LAMMPS' bundled
+# STUBS mpi.h does not define it. Without a real MPI, LAMMPS configures against STUBS and the
+# pair style fails to compile late in the build, so this is worth catching now.
+if command -v mpicxx >/dev/null || command -v mpiCC >/dev/null; then
+    echo "  MPI              : $(command -v mpicxx || command -v mpiCC)"
+    HAVE_MPI=yes
+else
+    echo "  MPI              : NOT FOUND -- the pair styles require a real MPI."
+    echo "                     'module avail' and load one (openmpi/mpich), then retry."
+    HAVE_MPI=no
+fi
+
 # Kokkos needs the exact GPU architecture; getting it wrong costs a full rebuild.
 KOKKOS_ARCH=""
 if command -v nvidia-smi >/dev/null; then
@@ -139,6 +151,8 @@ if [[ "$MODE" == pair ]]; then
     SRC="$PREFIX/lammps-pair"
     PATCHREPO="$PREFIX/pair_nequip_allegro"
 
+    [[ "${HAVE_MPI:-no}" == yes ]] || die "no MPI compiler found; load an MPI module first"
+
     say "sources"
     # The pair styles require the 10 Sep 2025 LAMMPS release or newer, so take the tip.
     [[ -d "$SRC" ]]       || git clone --depth=1 https://github.com/lammps/lammps "$SRC" || die "clone lammps"
@@ -160,6 +174,10 @@ if [[ "$MODE" == pair ]]; then
         -DNEQUIP_AOT_COMPILE=ON
         # torch's CMake hunts for an MKL it does not need; point it anywhere that exists
         -DMKL_INCLUDE_DIR=/tmp
+        # required, not optional: the pair style calls MPI_Comm_split_type() with no fallback,
+        # and LAMMPS' STUBS mpi.h does not provide it. Asking explicitly makes a missing MPI a
+        # configure error rather than a compile error much later.
+        -DBUILD_MPI=ON
     )
     if [[ "$KOKKOS" == on ]]; then
         # Kokkos is recommended (best GPU performance, and the only GPU-resident path for

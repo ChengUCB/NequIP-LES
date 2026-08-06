@@ -23,6 +23,7 @@ side.
 """
 
 import argparse
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -58,31 +59,58 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("checkpoint")
     ap.add_argument("structure", help="xyz/extxyz file; the first frame is used")
-    ap.add_argument("--outdir", default="consistency_out")
+    ap.add_argument("--outdir", default=None,
+                    help="default: consistency_out/<checkpoint name>")
+    ap.add_argument("--backbone", choices=("auto", "nequip", "allegro"), default="auto",
+                    help="override the backbone detected from the checkpoint")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--etol", type=float, default=1e-4, help="eV/atom (default 1e-4)")
     ap.add_argument("--ftol", type=float, default=1e-3, help="eV/A (default 1e-3)")
     args = ap.parse_args()
 
     ckpt = Path(args.checkpoint).resolve()
-    out = Path(args.outdir).resolve()
+    # keyed on the checkpoint: artefacts are named by target only, so a shared directory
+    # would silently hand a different model's exports to the comparison
+    out = Path(args.outdir or Path("consistency_out") / ckpt.stem).resolve()
     out.mkdir(parents=True, exist_ok=True)
+
+    # and a stamp, in case the same checkpoint path is rewritten by a later training run
+    stamp_file = out / "source.txt"
+    stamp = f"{ckpt}\n{ckpt.stat().st_mtime_ns}\n"
+    if stamp_file.exists() and stamp_file.read_text() != stamp:
+        print(f"(checkpoint changed since {out.name} was built; re-exporting)")
+        for old in list(out.glob("*.nequip.pt2")) + list(out.glob("*.nequip.lmp.pt")):
+            old.unlink()
+    stamp_file.write_text(stamp)
 
     atoms = read(args.structure, index=0)
     species = engines.type_names(ckpt)
-    allegro = engines.is_allegro(ckpt)
+    if args.backbone == "auto":
+        base, why = engines.backbone(ckpt)
+    else:
+        base, why = args.backbone, "--backbone"
+    allegro = base == "allegro"
     pair_target = "pair_allegro" if allegro else "pair_nequip"
 
     print(f"checkpoint : {ckpt}")
     print(f"structure  : {args.structure}  ({len(atoms)} atoms, pbc={atoms.pbc.all()})")
     print(f"type names : {species}")
-    print(f"backbone   : {'allegro' if allegro else 'nequip'}  ->  --target {pair_target}")
+    print(f"backbone   : {base}  ->  --target {pair_target}   ({why})")
     print(f"device     : {args.device}")
+    print(f"outdir     : {out}")
 
     # ---------------------------------------------------------------- export ----
     print("\n== exporting ==")
     artefacts = {}
-    for name, target in (("ase", "ase"), ("torchsim", "batch"), ("lammps", pair_target)):
+    wanted = [("ase", "ase"), ("lammps", pair_target)]
+    # no point exporting the batched target with nothing able to load it (torch-sim needs
+    # python >= 3.11, so it is simply absent on some environments)
+    if importlib.util.find_spec("torch_sim") is not None:
+        wanted.insert(1, ("torchsim", "batch"))
+    else:
+        print("  torchsim  not exported: torch_sim not importable "
+              "(pip install torch-sim-atomistic, needs python >= 3.11)")
+    for name, target in wanted:
         path = out / f"{name}.nequip.pt2"
         if path.exists():
             print(f"  {name:9s} reusing {path.name}")
@@ -140,8 +168,7 @@ def main():
             lines = engines.lammps_mliap_lines(artefacts["mliap"], species)
             attempt("mliap",
                     lambda: engines.eval_lammps(lmp_mliap, atoms, species, out / "mliap", lines,
-                                                engines.MLIAP_KOKKOS_ARGS,
-                                                newton="on")[:2])
+                                                engines.MLIAP_KOKKOS_ARGS)[:2])
         else:
             skipped["mliap"] = "$LMP_MLIAP unset (./build_lammps.sh mliap)"
             print(f"  {'mliap':9s} skipped ({skipped['mliap']})")

@@ -14,7 +14,9 @@ Docs:
     https://nequip.readthedocs.io/en/latest/integrations/lammps/mliap.html
 """
 
+import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -48,9 +50,49 @@ def type_names(ckpt_path):
     return list(names)
 
 
-def is_allegro(ckpt_path):
-    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    return "allegro" in str(ckpt.get("hyper_parameters", {})).lower()
+def _collect_key(obj, key):
+    """Every value stored under `key`, anywhere in a nested dict/list."""
+    found, stack = [], [obj]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, dict):
+            if key in cur:
+                found.append(cur[key])
+            stack.extend(cur.values())
+        elif isinstance(cur, (list, tuple)):
+            stack.extend(cur)
+    return found
+
+
+def backbone(ckpt_path):
+    """Which backbone a checkpoint holds: ("nequip" | "allegro", evidence).
+
+    Not a substring search for "allegro" over the whole config -- nequip records its
+    installed extension packages in the checkpoint, so that name is present whenever allegro
+    is merely installed, and every model looked like an Allegro one. Read the model's own
+    declaration instead.
+    """
+    hp = torch.load(ckpt_path, map_location="cpu", weights_only=False).get("hyper_parameters", {})
+
+    # LES models name it directly
+    for val in _collect_key(hp, "base_model"):
+        if isinstance(val, str) and val.strip().lower() in ("nequip", "allegro"):
+            return val.strip().lower(), f"base_model: {val.strip()}"
+
+    # otherwise the model builder's own target
+    targets = [t for t in _collect_key(hp, "_target_")
+               if isinstance(t, str) and ".model" in t]
+    for t in targets:
+        if t.startswith("allegro."):
+            return "allegro", f"_target_: {t}"
+    for t in targets:
+        if t.startswith("nequip."):
+            return "nequip", f"_target_: {t}"
+
+    raise SystemExit(
+        f"cannot tell the backbone of {ckpt_path} from its config "
+        f"(model targets seen: {targets or 'none'}). Pass --backbone nequip|allegro."
+    )
 
 
 # ------------------------------------------------------------------------- preload ----
@@ -108,7 +150,7 @@ PRECISION_CONST = 1.0e6
 
 
 def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
-                newton="off", extract=()):
+                newton=None, extract=()):
     """Run `lmp` for zero timesteps and read the potential energy and forces back.
 
     `pair_lines` is the only difference between the pair styles and ML-IAP; the rest of the
@@ -118,8 +160,12 @@ def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
     (`-k on g 1 -sf kk ...`), as the nequip docs' example shows -- that integration is built
     on the KOKKOS package, and without them the styles it installs are not the ones used.
 
-    `newton` is "off" for the pair styles, following pair_nequip_allegro's own repro tests,
-    and "on" for ML-IAP, following the nequip ML-IAP docs.
+    `newton` defaults to whatever the pair style demands, because the two disagree
+    (pair_nequip_allegro.cpp:149-150):
+
+        pair_style nequip   -> newton pair off, or it errors out
+        pair_style allegro  -> newton pair on,  or it errors out
+        mliap               -> on, per the nequip ML-IAP docs
 
     `extract` names per-atom keys to pull out of the model's own output dictionary via
     `compute <style>/atom <key> <n_components> 0`; they come back in the third element of the
@@ -140,10 +186,15 @@ def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
     # `specorder` fixes LAMMPS type 1..n to `species`, and the pair_coeff line names the
     # same list in the same order. Both come from one variable because a mismatch here is
     # the classic "model runs, forces are nonsense" failure.
-    write(data, atoms, format="lammps-data", specorder=list(species), masses=True,
-          atom_style="atomic")
+    # No masses in the data file: the keyword's name has changed across ASE versions, and
+    # LAMMPS only insists that *some* mass exists. They play no part in a 0-step energy and
+    # force evaluation, so they are set in the input script instead -- which is what
+    # pair_nequip_allegro's own repro tests do.
+    write(data, atoms, format="lammps-data", specorder=list(species), atom_style="atomic")
 
     style = "allegro" if "pair_style      allegro" in pair_lines else "nequip"
+    if newton is None:
+        newton = "off" if "pair_style      nequip" in pair_lines else "on"
     extract_cmds, dump_cols = [], []
     for key, ncomp in extract:
         cid = "x_" + re.sub(r"\W", "_", key)
@@ -152,38 +203,51 @@ def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
         dump_cols += ([f"c_{cid}"] if ncomp == 1
                       else [f"c_{cid}[{i + 1}]" for i in range(ncomp)])
 
-    script = workdir / "in.check"
-    script.write_text(
-        "units           metal\n"
-        "atom_style      atomic\n"
+    lines = [
+        "units           metal",
+        "atom_style      atomic",
         # `s` (shrink-wrapped) rather than `f` for the non-periodic case, as in
         # pair_nequip_allegro's repro tests: a fixed box loses atoms that sit outside it,
         # while a shrink-wrapped one always encloses them
-        f"boundary        {'p p p' if bool(atoms.pbc.all()) else 's s s'}\n"
-        "atom_modify     map yes\n"
-        f"newton          {newton}\n"
-        f"read_data       {data.name}\n"
-        f"{pair_lines}\n"
+        f"boundary        {'p p p' if bool(atoms.pbc.all()) else 's s s'}",
+        "atom_modify     map yes",
+        f"newton          {newton}",
+        f"read_data       {data.name}",
+        pair_lines,
+        *[f"mass            {i + 1} 1.0" for i in range(len(species))],
         # a neighbour list rebuilt unconditionally, so `run 0` cannot reuse a stale one
-        "neighbor        1.0 bin\n"
-        "neigh_modify    delay 0 every 1 check no\n"
-        + "".join(c + "\n" for c in extract_cmds) +
-        "thermo_style    custom step pe\n"
-        "thermo          1\n"
-        "run             0\n"
-        # full precision, via a file rather than the thermo table
-        f"print           $({PRECISION_CONST} * pe) file pe.dat\n"
+        "neighbor        1.0 bin",
+        "neigh_modify    delay 0 every 1 check no",
+        *extract_cmds,
+        "thermo_style    custom step pe",
+        "thermo          1",
+        "run             0",
+        # full precision, via a file rather than the thermo table, which rounds
+        f"print           $({PRECISION_CONST} * pe) file pe.dat",
         "write_dump      all custom out.dump id fx fy fz "
-        + " ".join(dump_cols) +
-        " modify format float %20.15g\n"
-    )
+        + " ".join(dump_cols) + " modify format float %20.15g",
+    ]
+    script = workdir / "in.check"
+    script.write_text("\n".join(lines) + "\n")
+
+    # LAMMPS is built against a real MPI (the pair styles require one). Started as a plain
+    # subprocess from inside an `srun` step, its MPI_Init sees the outer step's PMI/PMIX
+    # variables, aborts on a NULL communicator, and takes the whole SLURM step down. Hiding
+    # those variables makes it initialise as an ordinary single-process job instead.
+    # Set LMP_LAUNCHER="srun -n 1" to launch it properly instead, in which case the
+    # environment is left alone.
+    launcher = shlex.split(os.environ.get("LMP_LAUNCHER", ""))
+    env = dict(os.environ)
+    if not launcher:
+        for key in [k for k in env if k.startswith(("PMI_", "PMIX_", "SLURM_"))]:
+            del env[key]
 
     log = workdir / "lmp.log"
     with open(log, "w") as fh:
-        cmd = [str(lmp), "-in", script.name, *[str(a) for a in extra_args]]
+        cmd = [*launcher, str(lmp), "-in", script.name, *[str(a) for a in extra_args]]
         fh.write("# " + " ".join(cmd) + "\n")
         fh.flush()
-        rc = subprocess.run(cmd, cwd=workdir, stdout=fh,
+        rc = subprocess.run(cmd, cwd=workdir, stdout=fh, env=env,
                             stderr=subprocess.STDOUT).returncode
     if rc != 0:
         tail = "\n".join(log.read_text().splitlines()[-6:])
