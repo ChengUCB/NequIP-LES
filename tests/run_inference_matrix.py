@@ -113,6 +113,9 @@ def main():
     ap.add_argument("--loose-etol", type=float, default=1e-2, help="eV/atom for tf32/modifiers")
     ap.add_argument("--loose-ftol", type=float, default=1e-1, help="eV/A for tf32/modifiers")
     ap.add_argument("--no-package", action="store_true", help="skip the .nequip.zip route")
+    ap.add_argument("--mliap-no-compile", action="store_true",
+                    help="re-prepare each ML-IAP file with --no-compile before running it; "
+                         "needed while its run-time torch.compile is broken")
     args = ap.parse_args()
 
     compiled = Path(args.dir)
@@ -186,6 +189,23 @@ def main():
         for path, info in art["mliap"]:
             extra = info["extra"] or ""
             label = "mliap" + (f"/{extra}" if extra else "")
+            if args.mliap_no_compile:
+                # the stored artefact was prepared with run-time torch.compile enabled;
+                # rebuild it eagerly so the interface can actually be exercised
+                eager = path.with_name(path.name.replace(".nequip.lmp.pt",
+                                                         "_nocompile.nequip.lmp.pt"))
+                if not eager.exists():
+                    cmd = ["nequip-prepare-lmp-mliap", str(ckpt), str(eager), "--no-compile"]
+                    if extra:
+                        cmd += ["--modifiers", extra]
+                    with open(compiled / f"{eager.stem}.log", "w") as fh:
+                        subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT)
+                if eager.exists():
+                    path, label = eager, label + " (no-compile)"
+                else:
+                    print(f"  {label:52s} skipped (--no-compile prepare failed)")
+                    skipped.append(f"{tag}/{label}: --no-compile prepare failed")
+                    continue
             if not lmp_mliap:
                 print(f"  {label:52s} skipped ($LMP_MLIAP unset)")
                 continue
