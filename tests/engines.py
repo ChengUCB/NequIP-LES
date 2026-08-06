@@ -182,6 +182,21 @@ def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
     """
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
+
+    # LAMMPS' read_data rejects atoms that lie outside the declared box
+    # ("Did not assign all atoms correctly"), which is easy to hit: an isolated structure
+    # carries a dummy cell its coordinates were never fitted into. Both adjustments below
+    # leave energies and forces untouched -- one wraps into an equivalent periodic image,
+    # the other only translates and resizes a box the model ignores anyway.
+    atoms = atoms.copy()
+    if bool(atoms.pbc.all()):
+        atoms.wrap()
+    else:
+        pos = atoms.positions
+        margin = 10.0
+        atoms.set_cell(np.diag(pos.max(axis=0) - pos.min(axis=0) + 2.0 * margin))
+        atoms.positions = pos - pos.min(axis=0) + margin
+
     data = workdir / "data.lmp"
     # `specorder` fixes LAMMPS type 1..n to `species`, and the pair_coeff line names the
     # same list in the same order. Both come from one variable because a mismatch here is
@@ -261,8 +276,13 @@ def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
                 f"or raise LMP_TIMEOUT."
             ) from None
     if rc != 0:
-        tail = "\n".join(log.read_text().splitlines()[-6:])
-        raise RuntimeError(f"lmp exited {rc}: {tail}")
+        # the last few lines are usually LAMMPS' setup chatter, not the failure; pick out the
+        # lines that actually say something went wrong, and fall back to the tail
+        text = log.read_text().splitlines()
+        hits = [ln.strip() for ln in text
+                if re.search(r"ERROR|Error|Exception|Traceback|error:", ln)]
+        detail = " | ".join(hits[-3:]) if hits else " | ".join(t.strip() for t in text[-3:])
+        raise RuntimeError(f"lmp exited {rc}: {detail}  (full log: {log})")
 
     pe_file = workdir / "pe.dat"
     if not pe_file.exists():
