@@ -10,10 +10,16 @@ rather than exporting again.
     ase        --target ase                             -
     torchsim   --target batch                           pip install torch-sim-atomistic
     lammps     --target pair_nequip / pair_allegro      $LMP
-    mliap      nequip-prepare-lmp-mliap                 $LMP_MLIAP
 
 Engines whose artefact or binary is missing are skipped and reported, so this is useful
-before the LAMMPS builds exist as well as after.
+before the LAMMPS build exists as well as after.
+
+KNOWN GAP -- LAMMPS ML-IAP is not exercised.
+    The ML-IAP wrapper hands the model `edge_vectors` but neither absolute positions nor the
+    cell, so a LES model raises KeyError: 'pos' -- the Ewald sum has nothing to sum over. Its
+    run-time torch.compile also fails on torch 2.13 inside nequip's cutoff function
+    (InductorError: KeyError 'unbacked_bindings'). Both are upstream matters in what nequip
+    documents as a beta integration, so nothing is run here until they are resolved there.
 
 Why bother: `nequip-compile` already checks each artefact against the eager model, but one
 at a time and only through its own interface. It cannot catch a wrong unit, a wrong type
@@ -25,7 +31,6 @@ side.
 import argparse
 import importlib.util
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -63,10 +68,13 @@ def main():
                     help="default: consistency_out/<checkpoint name>")
     ap.add_argument("--backbone", choices=("auto", "nequip", "allegro"), default="auto",
                     help="override the backbone detected from the checkpoint")
+    ap.add_argument("--pair-target", choices=("auto", "pair_nequip", "pair_allegro"),
+                    default="auto",
+                    help="which LAMMPS target to export. `auto` follows the backbone. Worth "
+                         "overriding to pair_nequip for a PERIODIC Allegro+LES model: only "
+                         "that target passes a cell, and it feeds the model only the local "
+                         "atoms, which is what an Ewald sum needs")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    ap.add_argument("--mliap-no-compile", action="store_true",
-                    help="prepare the ML-IAP file with --no-compile (eager); use when its "
-                         "run-time torch.compile fails")
     ap.add_argument("--etol", type=float, default=1e-4, help="eV/atom (default 1e-4)")
     ap.add_argument("--ftol", type=float, default=1e-3, help="eV/A (default 1e-3)")
     args = ap.parse_args()
@@ -93,7 +101,10 @@ def main():
     else:
         base, why = args.backbone, "--backbone"
     allegro = base == "allegro"
-    pair_target = "pair_allegro" if allegro else "pair_nequip"
+    pair_target = ("pair_allegro" if allegro else "pair_nequip") \
+        if args.pair_target == "auto" else args.pair_target
+    # the LAMMPS pair style follows the artefact's target, not the backbone
+    pair_style_is_allegro = pair_target == "pair_allegro"
 
     print(f"checkpoint : {ckpt}")
     print(f"structure  : {args.structure}  ({len(atoms)} atoms, pbc={atoms.pbc.all()})")
@@ -127,18 +138,6 @@ def main():
         else:
             print(f"  {name:9s} EXPORT FAILED (see export_{name}.log)")
 
-    # ML-IAP runs the model through torch.compile at LAMMPS run time, unlike every other
-    # path here, which loads an artefact compiled ahead of time. When that run-time
-    # compilation fails, `--no-compile` falls back to eager and still exercises the
-    # interface; the numbers are what we are after, not the speed.
-    mliap_file = out / "model.nequip.lmp.pt"
-    if shutil.which("nequip-prepare-lmp-mliap") and not mliap_file.exists():
-        extra = ["--no-compile"] if args.mliap_no_compile else []
-        cmd = ["nequip-prepare-lmp-mliap", str(ckpt), str(mliap_file), *extra]
-        print(f"  {'mliap':9s} $ {' '.join(cmd)}")
-        run(cmd, out / "export_mliap.log")
-    if mliap_file.exists():
-        artefacts["mliap"] = mliap_file
 
     # ------------------------------------------------------------- evaluate ----
     print("\n== evaluating ==")
@@ -163,23 +162,14 @@ def main():
     lmp = os.environ.get("LMP")
     if "lammps" in artefacts:
         if lmp:
-            lines = engines.lammps_pair_lines(artefacts["lammps"], species, allegro)
+            lines = engines.lammps_pair_lines(artefacts["lammps"], species,
+                                              pair_style_is_allegro)
             attempt("lammps",
                     lambda: engines.eval_lammps(lmp, atoms, species, out / "lammps", lines)[:2])
         else:
             skipped["lammps"] = "$LMP unset (./build_lammps.sh pair)"
             print(f"  {'lammps':9s} skipped ({skipped['lammps']})")
 
-    lmp_mliap = os.environ.get("LMP_MLIAP")
-    if "mliap" in artefacts:
-        if lmp_mliap:
-            lines = engines.lammps_mliap_lines(artefacts["mliap"], species)
-            attempt("mliap",
-                    lambda: engines.eval_lammps(lmp_mliap, atoms, species, out / "mliap", lines,
-                                                engines.MLIAP_KOKKOS_ARGS)[:2])
-        else:
-            skipped["mliap"] = "$LMP_MLIAP unset (./build_lammps.sh mliap)"
-            print(f"  {'mliap':9s} skipped ({skipped['mliap']})")
 
     # -------------------------------------------------------------- compare ----
     if len(results) < 2:

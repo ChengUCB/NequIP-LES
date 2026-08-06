@@ -25,7 +25,6 @@
 #   ./run_gpu.sh                        # everything available
 #   ./run_gpu.sh nequip                 # only models whose tag contains "nequip"
 #   ROWS=enable_ ./run_gpu.sh           # only the acceleration rows
-#   ROWS=mliap ./run_gpu.sh             # only the ML-IAP rows
 #   KEEP_OUTPUTS=1 ./run_gpu.sh         # keep checkpoints, so a rerun reuses them
 set -uo pipefail
 cd "$(dirname "$0")"
@@ -114,7 +113,6 @@ row_skipped() {   # $1 row -> 0 when this row is excluded
     [[ -n "$FILTER" && "$1" != *"$FILTER"* ]] && return 0
     # ROWS narrows to individual rows regardless of the model filter, e.g.
     #   ROWS=enable_ ./run_gpu.sh          only the acceleration rows
-    #   ROWS=mliap   ./run_gpu.sh          only the ML-IAP rows
     [[ -n "${ROWS:-}" && "$1" != *"${ROWS}"* ]] && return 0
     return 1
 }
@@ -189,26 +187,15 @@ for tag in nequip_water_eager nequip_water_compiled nequip_dipep_eager nequip_di
         # torch-sim loads the batched target, not the ase one
         export_ckpt "$CK" "$tag/batch/$mode/cuda" batch "$mode"
         [[ "$skip_pair" == no ]] && export_ckpt "$CK" "$tag/$pair/$mode/cuda" "$pair" "$mode"
-        # TF32 changes float32 arithmetic and the Ewald k-space sum is sensitive to it
-        export_ckpt "$CK" "$tag/ase/$mode/cuda/tf32" ase "$mode" --tf32
     done
 
-    # LAMMPS ML-IAP is not a --target: it has its own CLI (nequip-prepare-lmp-mliap),
-    # takes the same --modifiers, and needs LAMMPS built with ML-IAP in this env
-    if "$PY" -c "import lammps" 2>/dev/null; then
-        mliap() {   # $1 row suffix, $2... extra args
-            local suffix="$1"; shift
-            row_skipped "$tag/mliap$suffix" && return 0
-            local name="${tag}_mliap${suffix//\//_}"
-            nequip-prepare-lmp-mliap "$CK" "compiled/${name}.nequip.lmp.pt" "$@" \
-                > "compiled/${name}.log" 2>&1
-            record "$tag/mliap$suffix" $? "compiled/${name}.log"
-        }
-        mliap ""
-        for mod in $(mods_for "$tag"); do mliap "/$mod" --modifiers "$mod"; done
-    else
-        printf '  %-60s skipped (no LAMMPS ML-IAP in this env)\n' "$tag/mliap"
-    fi
+    # KNOWN GAP -- LAMMPS ML-IAP is not exercised here.
+    # The ML-IAP wrapper hands the model `edge_vectors` but neither absolute positions nor the
+    # cell (nequip/integrations/lammps_mliap/lmp_mliap_wrapper.py), so a LES model raises
+    # KeyError: 'pos' -- the Ewald sum has nothing to sum over. Separately, its run-time
+    # torch.compile currently fails on torch 2.13 inside nequip's own cutoff function
+    # (InductorError: KeyError 'unbacked_bindings'). Both are upstream matters, and the
+    # integration is documented as beta. Nothing is run until they are resolved upstream.
 
     # ---- accelerations, on every target that matters for inference ----
     for mod in $(mods_for "$tag"); do

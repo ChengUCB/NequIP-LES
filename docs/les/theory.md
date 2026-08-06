@@ -2,121 +2,195 @@
 
 ## The problem
 
-A short-range MLIP writes the energy as a sum over atoms inside a cutoff $r_c$:
+A short-range MLIP writes the energy as a sum of local atomic contributions inside a cutoff,
 
-$$E = \sum_i \varepsilon_i(\{\mathbf{r}_j : r_{ij} < r_c\})$$
+$$E^\text{sr} = \sum_{i=1}^{N} E_i$$
 
-Electrostatics does not fit in that form. A Coulomb interaction decays as $1/r$, which is
-slower than the volume of a shell grows, so no finite cutoff converges the sum. Charge
-transfer, dielectric screening and polarization response are all outside what such a model
-can express -- not because it is not flexible enough, but because the information is not in
-its inputs.
+with $r_c$ typically around 5–6 Å. Electrostatics does not fit in that form: a Coulomb
+interaction decays as $1/r$, slower than the volume of a shell grows, so no finite cutoff
+converges the sum. Message passing enlarges the receptive field but guarantees nothing --
+deep networks can lose the information to over-smoothing.
 
 ## The idea: latent charges
 
-LES splits the energy in two:
+LES splits the energy in two,
 
-$$E = E_\text{SR} + E_\text{LR}$$
+$$E = E^\text{sr} + E^\text{lr}$$
 
-$E_\text{SR}$ is the ordinary short-range model. For $E_\text{LR}$, the network predicts one
-scalar per atom from its local environment,
+and builds $E^\text{lr}$ from a **latent atomic charge** $q_i^\text{les}$, predicted by a small
+network from the same local invariant features the model already uses for $E_i$.
 
-$$q_i = f(\text{descriptors of atom } i)$$
+Two design principles make this work, and they are the whole method
+({doc}`Kim & Cheng 2026 <../citation>`):
 
-and LES computes the electrostatic energy of that set of charges with an Ewald sum.
+1. **Use a Coulomb functional form with environment-dependent charges.** The physics is in
+   the functional form, so the asymptotics are right by construction and the charge stays
+   interpretable.
+2. **Do not train on DFT partial charges.** There is no unique mapping from an electron
+   density to atomic charges -- Mulliken, Hirshfeld and MBIS disagree -- so fitting one
+   choice fixes an arbitrary electrostatic description. Training on DFT charges has also been
+   shown to *hurt* energy and force accuracy.
 
-The important part is what does **not** happen: nothing supervises $q_i$. There is no
-reference charge, no population analysis, no partial-charge target. The only training signal
-is the total energy and the forces, and the charges are whatever makes those come out right.
-This is why they are called *latent* -- they are an internal representation that happens to
-behave like charge, not a fit to a definition of charge.
+So nothing supervises $q_i^\text{les}$. The only training signal is the total energy and the
+forces, and the charges are whatever makes those come out right. This is why they are called
+*latent*.
 
-They are not arbitrary, either. Because $E_\text{LR}$ depends on them only through a physical
-Coulomb form, the only way they can lower the loss is by describing the actual long-range
-part of the interaction. In practice they come out close to physically sensible charges, and
-they transfer: a model trained on energies and forces alone predicts dipoles and dielectric
-response it never saw.
+They are not arbitrary, either. Because $E^\text{lr}$ depends on them only through a physical
+Coulomb form, the only way they can lower the loss is by describing the actual long-range part
+of the interaction. In practice they come out physically meaningful: models trained on energies
+and forces alone predict molecular dipoles, Born effective charges, IR spectra and ionic
+conductivities they never saw.
+
+There is a second, subtler reason not to fit DFT charges. Coulomb interactions between atomic
+charges are screened by the fast electronic background with relative permittivity
+$\varepsilon_\infty$. Learning from forces absorbs that screening automatically, so the learned
+charges are *scaled* physical charges,
+
+$$q_i^\text{les} = \frac{q_i}{\sqrt{\varepsilon_e}}$$
+
+which is why $\varepsilon_\infty$ reappears only when you want unscaled physical quantities
+such as BECs.
 
 ## The Ewald sum
 
-Each latent charge is smeared into a Gaussian of width $\sigma$. That single choice makes
-both halves of the calculation finite.
+Each latent charge is smeared into a Gaussian of width $\sigma$ (about 1 Å). That single
+choice makes both halves of the calculation finite.
 
-**Periodic systems** are summed in reciprocal space. With the structure factor
+**Isolated systems** are summed pairwise in real space, where the smeared charges replace the
+bare $1/r$ with an error function:
 
-$$S(\mathbf{k}) = \sum_i q_i e^{i\mathbf{k}\cdot\mathbf{r}_i}$$
+$$E^\text{lr} = \frac{1}{2}\frac{1}{4\pi\varepsilon_0}\sum_{i=1}^{N}\sum_{j=1}^{N}
+\bigl[1-\varphi(r_{ij})\bigr]\frac{q_i^\text{les} q_j^\text{les}}{r_{ij}},
+\qquad \varphi(r) = \operatorname{erfc}\!\left(\frac{r}{\sqrt{2}\,\sigma}\right)$$
 
-the energy is
+At short range the kernel tends to a constant rather than diverging -- the Gaussian overlap
+removes the singularity. This matters for more than numerics: the long-range term is *smooth
+and weak* exactly where the short-range model is already accurate, so the two do not fight
+over the same physics. $\sigma$ is where the handover happens.
 
-$$E_\text{LR} = \frac{2\pi}{V} \sum_{\mathbf{k} \neq 0} \frac{e^{-\sigma^2 k^2 / 2}}{k^2}\, |S(\mathbf{k})|^2$$
+**Periodic systems** are summed in reciprocal space:
 
-summed over the reciprocal lattice with $|\mathbf{k}| \le 2\pi/\texttt{dl}$. The Gaussian
-factor $e^{-\sigma^2 k^2/2}$ cuts the sum off by itself: large $k$ contributes nothing, so a
-finite number of terms is exact to any tolerance you like.
+$$E^\text{lr} = \frac{1}{2\varepsilon_0 V}\sum_{0<k<k_c}\frac{e^{-\sigma^2k^2/2}}{k^2}
+\bigl|S(\mathbf{k})\bigr|^2,
+\qquad S(\mathbf{k}) = \sum_{i=1}^{N} q_i^\text{les}\, e^{i\mathbf{k}\cdot\mathbf{r}_i}$$
 
-**Isolated systems** are summed in real space, where the smeared charges give an error
-function instead of a bare $1/r$:
+The Gaussian factor $e^{-\sigma^2k^2/2}$ truncates the sum by itself: large $k$ contributes
+nothing, so a finite number of terms is exact to any tolerance you like. `dl` sets the cutoff
+$k_c = 2\pi/\texttt{dl}$; the default `dl: 2.0` Å corresponds to $k_c = \pi$.
 
-$$E_\text{LR} = \frac{1}{2} \sum_{i \neq j} q_i q_j \frac{\operatorname{erf}\!\left(r_{ij} / \sigma\sqrt{2}\right)}{r_{ij}}$$
+Charge neutrality is not imposed. For a neutral system the learned charges sum to very nearly
+zero on their own, and any residual is absorbed as a uniform background -- the tinfoil boundary
+condition already implicit in the reciprocal-space sum.
 
-At short range $\operatorname{erf}(r/\sigma\sqrt{2})/r \to$ constant rather than diverging --
-the Gaussian overlap removes the singularity. This matters for more than numerics: it means
-the long-range term is *smooth and weak* where the short-range model is already accurate, so
-the two do not fight over the same physics. $\sigma$ is where the handover happens.
+`remove_self_interaction` subtracts each charge's interaction with its own Gaussian, which is
+an artefact of the smearing rather than physics.
 
-`remove_self_interaction` subtracts each charge's interaction with its own Gaussian,
-$\sum_i q_i^2 / (\sigma (2\pi)^{3/2})$, which is a spurious constant of the smearing rather
-than physics.
+## Multipoles and polarization response
 
-## Multipoles
+A single scalar per atom is the leading term of a multipole expansion of the atomic charge
+density. The extension adds the next ones and a linear response, all still learned from
+energies and forces alone
+({doc}`Kim, King, Park et al. <../citation>`).
 
-A single scalar per atom is the leading term. The extension adds the next ones -- latent
-**dipoles** $\boldsymbol{\mu}_i$ (an equivariant vector, `1o`) and **quadrupoles**
-$\mathbf{Q}_i$ (`2e`) -- summed with the same Ewald machinery, since the kernels are just
-derivatives of the monopole one.
+**Fixed multipoles.** Latent dipoles $\mathbf{u}_i^\text{les}$ (an equivariant `1o` vector) and
+traceless quadrupoles $\mathbf{Q}_i^\text{les}$ (`2e`) enter the same Ewald machinery through the
+structure factor:
 
-Polarizabilities go further: instead of fixed multipoles, the atom is given a **response**.
-With a polarizability $\kappa_i$ or $\alpha_i$, the local electrostatic field induces extra
-charge or extra dipole,
+$$S(\mathbf{k}) = \sum_{i=1}^{N}\Bigl(q_i^\text{les} + i\,\mathbf{k}\cdot\mathbf{u}_i^\text{les}
+- \tfrac{1}{2}\,\mathbf{k}\cdot\mathbf{Q}_i^\text{les}\cdot\mathbf{k}\Bigr)
+e^{i\mathbf{k}\cdot\mathbf{r}_i}$$
 
-$$q_i \rightarrow q_i + \Delta q_i(\mathbf{E}_i), \qquad \boldsymbol{\mu}_i \rightarrow \boldsymbol{\mu}_i + \Delta\boldsymbol{\mu}_i(\mathbf{E}_i)$$
+Each successive order decays with one more factor of $1/r$, so the expansion is truncated at
+dipole or quadrupole level.
+
+**Induced response.** Instead of a global charge-equilibration solve, the residual non-local
+effects are captured by *non-self-consistent* linear response: the induced terms respond once
+to the field of the fixed multipoles, not to each other. With a hardness $\kappa_i^{-1}$ and a
+polarizability $\boldsymbol{\alpha}_i$,
+
+$$\Delta q_i = -\kappa_i \Phi(\mathbf{r}_i), \qquad
+U_i^\text{iq} = -\tfrac{1}{2}\kappa_i\Phi^2(\mathbf{r}_i)$$
+
+$$\Delta\mathbf{u}_i = \boldsymbol{\alpha}_i\cdot\mathbf{E}(\mathbf{r}_i), \qquad
+U_i^\text{iu} = -\tfrac{1}{2}\mathbf{E}(\mathbf{r}_i)\cdot\boldsymbol{\alpha}_i\cdot\mathbf{E}(\mathbf{r}_i)$$
 
 so the charge distribution is no longer a function of geometry alone -- it reacts to the
 electrostatics it is itself generating. This is what lets one model describe dielectric
-screening, and it is what the `use_induced_charge` / `use_induced_dipole` flags turn on.
-`use_anisotropic_polarizability` makes $\alpha$ a tensor, so the response can depend on
-direction.
+screening, and it avoids the cubic cost that a Qeq matrix inversion brings.
+
+The total is assembled as
+
+$$U = U^\text{sr} + U^\text{elec} + \sum_i U_i^\text{iq} + \sum_i U_i^\text{iu}$$
+
+**Naming.** Model names in the published fits encode which terms are on, and they map
+one-to-one onto the `les_args` flags:
+
+| suffix | term | flag |
+|---|---|---|
+| `-les` | monopoles only | (default) |
+| `-u` | + dipoles | `use_dipole` |
+| `-Q` | + quadrupoles | `use_quadrupole` |
+| `-iq` | + induced charge | `use_induced_charge` |
+| `-iu` | + induced dipole | `use_induced_dipole` |
+
+So `nequiples-uQiqiu` is monopoles, dipoles, quadrupoles, induced charge and induced dipole --
+the full set. Adding terms generally improves accuracy, with the largest single gain coming
+from the monopole itself and diminishing returns after that.
 
 ## Born effective charges
 
-The polarization of a configuration follows from the latent charges,
+The polarization of a configuration follows from the latent variables,
 
-$$\mathbf{P} = \sum_i q_i \mathbf{r}_i \;(+ \text{dipole terms})$$
+$$\mathbf{P} = \sum_i (q_i + \Delta q_i)\,\mathbf{r}_i + \sum_i (\mathbf{u}_i + \Delta\mathbf{u}_i)$$
 
 and the Born effective charge tensor is its derivative with respect to an atomic position:
 
-$$Z^*_{i,\alpha\beta} = \frac{\partial P_\alpha}{\partial r_{i\beta}}$$
+$$Z^*_{i\alpha\beta} = \frac{\partial P_\alpha}{\partial r_{i\beta}}$$
 
-Since $q_i$ is itself a differentiable function of every position, autograd gives this
-directly -- no finite differences, no extra training target. `remove_mean` subtracts the mean
-latent charge of each configuration first, so the charges sum to zero and $\mathbf{P}$ is
-well defined; `epsilon_factor` applies the high-frequency dielectric screening
-$\varepsilon_\infty$.
+Since the latent variables are themselves differentiable functions of every position, autograd
+gives this directly -- no finite differences, no extra training target. For a homogeneous
+periodic system the charge part is taken in the $k\to0$ limit,
 
-This is the strongest evidence that the latent charges are not a fitting artefact: BECs are a
-response property that never appeared in training, and they come out right.
+$$Z^*_{i\alpha\beta} = \frac{\partial P^u_\alpha}{\partial r_{i\beta}}
++ \lim_{k\to0}\Re\left[e^{-ikr_{i\alpha}}\frac{\partial P^q_\alpha(k)}{\partial r_{i\beta}}\right],
+\qquad P^q_\alpha(k) = \sum_i \frac{\sqrt{\varepsilon_\infty}\,q_i^\text{les}}{ik} e^{ikr_{i\alpha}}$$
 
-## Cost
+which is where `epsilon_factor` ($=\varepsilon_\infty$) enters. In `nequip_les` this is
+`remove_mean`'s job to make well defined: it subtracts the mean latent charge of each
+configuration first, so the charges sum to zero and $\mathbf{P}$ does not depend on the origin.
 
-The reciprocal-space sum is $O(N K)$ for $N$ atoms and $K$ k-vectors; the real-space one is
-$O(N^2)$ over pairs, which is why non-periodic LES is for molecules rather than for large
-systems. In both cases the long-range term is a small fraction of the short-range network's
-cost at typical settings -- LES is cheap compared to the model it augments.
+BECs are the strongest evidence that the latent charges are not a fitting artefact: they are a
+response property that never appeared in training, they agree with DFT to a few hundredths of
+an electron, and they converge *faster* with training-set size than the forces do.
+
+```{warning}
+The periodic expression needs a single high-frequency permittivity $\varepsilon_\infty$ for a
+homogeneous bulk material. For heterogeneous systems -- interfaces between materials with
+different $\varepsilon_\infty$ -- it is not obvious how to choose it, and extending LES-based
+BEC extraction to such systems is an open problem.
+```
+
+## Cost, and what it cannot do
+
+The long-range term is a small fraction of the short-range network's cost at typical settings:
+the reciprocal sum is inexpensive next to the message passing, and MD timings with and without
+LES nearly coincide. The augmentation has been called effectively a "free lunch".
+
+Two limitations are worth knowing before you rely on it:
+
+* The charges come from **local** features, so there is no explicit mechanism for truly
+  long-range charge transfer through mobile carriers -- an induced surface charge on a
+  macroscopic metal electrode, for instance. Coupling to an explicit metallic boundary model is
+  the current remedy.
+* Because forces are the autograd derivative of a **global** energy, distributing the force
+  evaluation across GPUs or MPI ranks is not straightforward. This is why LES in LAMMPS is
+  restricted to [one MPI rank](../guide/lammps.md#one-mpi-rank).
 
 ## Reading
 
-The method and its successive extensions are developed in the papers listed under
-[Citation](../citation.md). Start with *Latent Ewald summation for machine learning of
-long-range interactions* for the method itself, *Machine learning interatomic potential can
-infer electrical response* for the BECs, and *A universal augmentation framework for
-long-range electrostatics* for the MLIP-agnostic formulation this package implements.
+The papers are listed under [Citation](../citation.md). Start with *Latent Ewald summation for
+machine learning of long-range interactions* for the method, *Long-range electrostatics for
+MLIPs is easier than we thought* for the design principles and where LES sits among the
+alternatives, *Machine learning interatomic potential can infer electrical response* for BECs,
+and *Polarizable atomic multipoles for learning long-range electrostatics* for the multipole
+and response terms this package implements.

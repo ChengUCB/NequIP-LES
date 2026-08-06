@@ -7,10 +7,12 @@ in a few minutes on a laptop.
 
 ```bash
 cd tests
-./run_all.sh          # training
-./run_bec.sh          # BEC inference
-./run_compile.sh      # deployment export
-./run_gpu.sh          # GPU-only: accelerations, ML-IAP
+pytest test_lr_energy_per_atom.py   # unit test of the per-atom long-range energy
+./run_all.sh                        # training
+./run_bec.sh                        # BEC inference
+./run_compile.sh                    # deployment export
+./run_gpu.sh                        # GPU-only: accelerations
+python run_inference_matrix.py      # do the artefacts agree with each other?
 ```
 
 The Ewald sum itself is tested in the [les](https://github.com/ChengUCB/les) repository
@@ -40,15 +42,30 @@ target and mode, plus `nequip-package`. Two rows are expected to *fail*: periodi
 a failure, same as a broken export.
 
 **`run_gpu.sh` -- GPU only.** The same exports with each acceleration modifier, split into
-train-time and inference-time lists because some modifiers are inference-only. Also packaging,
-TF32 exports, and the ML-IAP interface file. `ROWS=...` filters to a subset, which is useful
-when only the accelerations changed. 70 rows in total; the last full run was clean on an
-NVIDIA A40 with torch 2.13.0+cu130, with ML-IAP skipped for lack of a LAMMPS build.
+train-time and inference-time lists because some modifiers are inference-only, plus packaging.
+`ROWS=...` filters to a subset, which is useful when only the accelerations changed.
+
+**`run_inference_matrix.py` -- do the artefacts agree?** The scripts above prove each export
+*succeeds*. They do not prove the exports agree with each other, and a wrong unit, a wrong type
+mapping, or an energy term that never reached the per-atom array all produce a perfectly valid
+artefact that returns different numbers. This loads every artefact `run_gpu.sh` left behind
+through the interface it was built for and differences them against ASE, per model. It is what
+caught the long-range energy missing from LAMMPS' potential energy.
+
+**`check_consistency.py` -- the same check for one model of your own.** Exports a checkpoint
+fresh to every target and compares the engines:
+
+```bash
+python check_consistency.py path/to/model.ckpt data/water_train.xyz
+```
+
+`export LMP=…` brings LAMMPS into the comparison; without it the LAMMPS rows are skipped and
+the rest still runs.
 
 **`test_nequip.sh` / `test_allegro.sh` -- one model, every path.** Given a checkpoint, walks
-through all eleven deployment steps in order -- package, ASE, LAMMPS pair style, batch,
-export-from-package, accelerations, TF32, ML-IAP, ASE inference, torch-sim -- printing the
-exact command before each. Use these when you want to see what a real deployment of *your*
+through the deployment steps in order -- package, ASE, LAMMPS pair style, batch,
+export-from-package, accelerations, ASE inference, torch-sim -- printing the exact command
+before each. Use these when you want to see what a real deployment of *your*
 model does, rather than of the test models:
 
 ```bash
@@ -64,6 +81,13 @@ complete configs; they double as copy-able examples of every combination.
 [`tests/data/`](https://github.com/ChengUCB/NequIP-LES/tree/main/tests/data) holds the frames,
 including the `_dummycell` variants explained in
 [Non-periodic models need a dummy cell](ewald.md#non-periodic-models-need-a-dummy-cell).
+
+```{note}
+Two things are deliberately **not** exercised. TF32 exports were dropped: they never failed and
+added nothing over the plain export. LAMMPS ML-IAP is a known gap -- the wrapper passes the
+model no positions and no cell, so LES cannot run there at all
+([why](lammps.md#ml-iap)) -- and the scripts record it as such rather than attempting it.
+```
 
 Two helpers do the work the checks above rely on: `train_probed.py` wraps NequIP's tracing
 entry point to report `TRACED` / `NOT-TRACED`, and `wrap_modifier.py` writes a config with

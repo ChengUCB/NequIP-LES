@@ -11,7 +11,6 @@ Docs:
     https://nequip.readthedocs.io/en/latest/integrations/ase.html
     https://nequip.readthedocs.io/en/latest/integrations/torchsim.html
     https://nequip.readthedocs.io/en/latest/integrations/lammps/pair_styles.html
-    https://nequip.readthedocs.io/en/latest/integrations/lammps/mliap.html
 """
 
 import os
@@ -156,16 +155,13 @@ def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
     `pair_lines` is the only difference between the pair styles and ML-IAP; the rest of the
     input script is shared on purpose, so a discrepancy cannot come from the setup.
 
-    `extra_args` goes on the lmp command line. ML-IAP needs the Kokkos runtime flags there
-    (`-k on g 1 -sf kk ...`), as the nequip docs' example shows -- that integration is built
-    on the KOKKOS package, and without them the styles it installs are not the ones used.
+    `extra_args` goes on the lmp command line, e.g. Kokkos runtime flags.
 
     `newton` defaults to whatever the pair style demands, because the two disagree
     (pair_nequip_allegro.cpp:149-150):
 
         pair_style nequip   -> newton pair off, or it errors out
         pair_style allegro  -> newton pair on,  or it errors out
-        mliap               -> on, per the nequip ML-IAP docs
 
     `extract` names per-atom keys to pull out of the model's own output dictionary via
     `compute <style>/atom <key> <n_components> 0`; they come back in the third element of the
@@ -312,13 +308,3 @@ def lammps_pair_lines(artefact, species, allegro):
     return (f"pair_style      {style}\n"
             f"pair_coeff      * * {artefact} {' '.join(species)}")
 
-
-def lammps_mliap_lines(artefact, species):
-    return (f"pair_style      mliap unified {artefact} 0\n"
-            f"pair_coeff      * * {' '.join(species)}")
-
-
-# from the nequip ML-IAP docs' run example:
-#   srun -n 1 lmp -in in.lammps -k on g 1 -sf kk -pk kokkos newton on neigh half
-MLIAP_KOKKOS_ARGS = ("-k", "on", "g", "1", "-sf", "kk",
-                     "-pk", "kokkos", "newton", "on", "neigh", "half")

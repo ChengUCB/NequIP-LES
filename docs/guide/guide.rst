@@ -8,4 +8,5 @@ Guide
    les_args
    ewald
    deployment
+   lammps
    testing

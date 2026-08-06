@@ -21,12 +21,22 @@ differentiating the polarization with respect to atomic positions.
 
 ## When you want it
 
-* systems where long-range electrostatics matter: electrolytes, interfaces, charged
-  defects, polar solids;
-* properties that depend on the charge response: dielectric constants, IR spectra, BECs;
+* systems where long-range electrostatics matter: electrolytes, interfaces, charged defects,
+  polar and ionic materials, biomolecules;
+* properties that depend on the charge response: dielectric constants, IR and Raman spectra,
+  BECs, ionic conductivities;
 * cases where a short-range model plateaus in accuracy for reasons the cutoff explains.
 
-For a purely short-range problem the extra cost buys nothing -- use plain NequIP or Allegro.
+How much it buys depends on the backbone's receptive field. Across the published benchmarks,
+LES reduces force errors for **every** architecture tested, with the largest gains where the
+baseline sees least: single-layer MACE and CACE, and the strictly local Allegro. Multi-layer
+NequIP models gain the least, because message passing has already widened the receptive field.
+Systems built around non-local charge transfer are the extreme case -- error reductions above
+90% on the `Na8/9Cl8+` and `Au2/MgO(001)` sets.
+
+The overhead is small: the reciprocal sum is inexpensive next to the message passing, and MD
+timings with and without LES nearly coincide. For a genuinely short-range problem it still buys
+nothing -- use plain NequIP or Allegro.
 
 ## What this package is
 

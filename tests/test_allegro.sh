@@ -131,17 +131,17 @@ else
         --device cuda --mode aotinductor --target pair_allegro --modifiers enable_CuEquivarianceContracter
 fi
 
-step "8. TF32 -- the same export with tensor cores enabled"
-run tf32 "${COMPILE[@]}" "$CKPT" "$OUT"/ase_tf32.nequip.pt2 \
-    --device "$DEVICE" --mode aotinductor --target ase --tf32
 
 # -------------------------------------------------------------------- LAMMPS ---
-step "9. LAMMPS ML-IAP interface file (needs LAMMPS built with ML-IAP + python)"
-if ! has lammps; then
-    skip mliap "LAMMPS ML-IAP not in this environment -- see nequip docs integrations/lammps/mliap"
-else
-    run mliap nequip-prepare-lmp-mliap "$CKPT" "$OUT"/model.nequip.lmp.pt
-fi
+step "9. LAMMPS ML-IAP -- KNOWN GAP, not attempted"
+cat <<'NOTE'
+   The ML-IAP wrapper passes `edge_vectors` but neither absolute positions nor the cell,
+   so a LES model raises KeyError: 'pos' -- the Ewald sum has nothing to sum over. Its
+   run-time torch.compile also fails on torch 2.13 inside nequip's cutoff function. Both
+   are upstream issues in a beta integration; see
+   https://nequip.readthedocs.io/en/latest/integrations/lammps/mliap.html
+NOTE
+SKIP+=(mliap)
 
 # ------------------------------------------------------------------ run it -----
 step "10. ASE -- actually run the compiled model and compare with the checkpoint"

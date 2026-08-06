@@ -17,12 +17,18 @@ as they are. To export fresh from a checkpoint instead, use check_consistency.py
     <tag>_batch_<mode>_<dev>[_extra].nequip.pt2    torch-sim
     <tag>_pair_nequip_...                          LAMMPS pair_style nequip    ($LMP)
     <tag>_pair_allegro_...                         LAMMPS pair_style allegro   ($LMP)
-    <tag>_mliap[...].nequip.lmp.pt                 LAMMPS pair_style mliap     ($LMP_MLIAP)
     <tag>.nequip.zip                               compiled to ASE, then ASE
 
-`extra` is `tf32` or an acceleration modifier. Those are expected to differ slightly -- they
-change the arithmetic on purpose -- so they are checked against a looser tolerance and
-labelled in the output rather than being held to the strict one.
+`extra` is an acceleration modifier. Those are expected to differ slightly -- they change
+the arithmetic on purpose -- so they are checked against a looser tolerance and labelled in
+the output rather than being held to the strict one.
+
+KNOWN GAP -- LAMMPS ML-IAP is not exercised.
+    The ML-IAP wrapper hands the model `edge_vectors` but neither absolute positions nor the
+    cell, so a LES model raises KeyError: 'pos' -- the Ewald sum has nothing to sum over. Its
+    run-time torch.compile also fails on torch 2.13 inside nequip's cutoff function
+    (InductorError: KeyError 'unbacked_bindings'). Both are upstream matters in what nequip
+    documents as a beta integration, so nothing is run here until they are resolved there.
 """
 
 import argparse
@@ -45,7 +51,6 @@ ARTEFACT_RE = re.compile(
     r"_(?P<mode>" + "|".join(engines.MODES) + r")"
     r"_(?P<dev>cuda|cpu)(?:_(?P<extra>.+))?$"
 )
-MLIAP_RE = re.compile(r"^(?P<tag>.+?)_mliap(?:_(?P<extra>.+))?$")
 
 # which frame to feed a given model; the species have to match what it was trained on
 STRUCTURES = {
@@ -75,7 +80,7 @@ def discover(compiled_dir):
     models = {}
 
     def slot(tag):
-        return models.setdefault(tag, {"exports": [], "mliap": [], "package": None})
+        return models.setdefault(tag, {"exports": [], "package": None})
 
     for path in sorted(Path(compiled_dir).iterdir()):
         name = path.name
@@ -84,10 +89,6 @@ def discover(compiled_dir):
             m = ARTEFACT_RE.match(stem)
             if m:
                 slot(m["tag"])["exports"].append((path, m.groupdict()))
-        elif name.endswith(".nequip.lmp.pt"):
-            m = MLIAP_RE.match(name.replace(".nequip.lmp.pt", ""))
-            if m:
-                slot(m["tag"])["mliap"].append((path, m.groupdict()))
         elif name.endswith(".nequip.zip"):
             slot(name.replace(".nequip.zip", ""))["package"] = path
     return models
@@ -108,14 +109,11 @@ def main():
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--etol", type=float, default=1e-4, help="eV/atom (default 1e-4)")
     ap.add_argument("--ftol", type=float, default=1e-3, help="eV/A (default 1e-3)")
-    # tf32 and the fused kernels change float32 arithmetic deliberately; holding them to the
-    # strict tolerance would report a difference that is the feature working
-    ap.add_argument("--loose-etol", type=float, default=1e-2, help="eV/atom for tf32/modifiers")
-    ap.add_argument("--loose-ftol", type=float, default=1e-1, help="eV/A for tf32/modifiers")
+    # the fused kernels change float32 arithmetic deliberately; holding them to the strict
+    # tolerance would report a difference that is the feature working
+    ap.add_argument("--loose-etol", type=float, default=1e-2, help="eV/atom for accelerated kernels")
+    ap.add_argument("--loose-ftol", type=float, default=1e-1, help="eV/A for accelerated kernels")
     ap.add_argument("--no-package", action="store_true", help="skip the .nequip.zip route")
-    ap.add_argument("--mliap-no-compile", action="store_true",
-                    help="re-prepare each ML-IAP file with --no-compile before running it; "
-                         "needed while its run-time torch.compile is broken")
     args = ap.parse_args()
 
     compiled = Path(args.dir)
@@ -129,12 +127,10 @@ def main():
         raise SystemExit(f"no artefacts in {compiled} (filter={args.filter!r})")
 
     lmp = os.environ.get("LMP")
-    lmp_mliap = os.environ.get("LMP_MLIAP")
     print(f"artefacts  : {compiled.resolve()}")
     print(f"models     : {len(models)}")
     print(f"device     : {args.device}")
     print(f"$LMP       : {lmp or '(unset -- pair styles will be skipped)'}")
-    print(f"$LMP_MLIAP : {lmp_mliap or '(unset -- ML-IAP will be skipped)'}")
 
     all_rows, mismatches, skipped = [], [], []
 
@@ -170,7 +166,7 @@ def main():
 
         for path, info in art["exports"]:
             extra = info["extra"] or ""
-            loose = bool(extra)          # tf32 or an acceleration modifier
+            loose = bool(extra)          # an acceleration modifier
             label = f"{info['target']}/{info['mode']}/{info['dev']}" + (f"/{extra}" if extra else "")
             target = info["target"]
 
@@ -185,35 +181,6 @@ def main():
                 lines = engines.lammps_pair_lines(path.resolve(), species, allegro)
                 wd = compiled / "run" / tag / label.replace("/", "_")
                 attempt(label, lambda l=lines, w=wd: engines.eval_lammps(lmp, atoms, species, w, l)[:2], loose)
-
-        for path, info in art["mliap"]:
-            extra = info["extra"] or ""
-            label = "mliap" + (f"/{extra}" if extra else "")
-            if args.mliap_no_compile:
-                # the stored artefact was prepared with run-time torch.compile enabled;
-                # rebuild it eagerly so the interface can actually be exercised
-                eager = path.with_name(path.name.replace(".nequip.lmp.pt",
-                                                         "_nocompile.nequip.lmp.pt"))
-                if not eager.exists():
-                    cmd = ["nequip-prepare-lmp-mliap", str(ckpt), str(eager), "--no-compile"]
-                    if extra:
-                        cmd += ["--modifiers", extra]
-                    with open(compiled / f"{eager.stem}.log", "w") as fh:
-                        subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT)
-                if eager.exists():
-                    path, label = eager, label + " (no-compile)"
-                else:
-                    print(f"  {label:52s} skipped (--no-compile prepare failed)")
-                    skipped.append(f"{tag}/{label}: --no-compile prepare failed")
-                    continue
-            if not lmp_mliap:
-                print(f"  {label:52s} skipped ($LMP_MLIAP unset)")
-                continue
-            lines = engines.lammps_mliap_lines(path.resolve(), species)
-            wd = compiled / "run" / tag / label.replace("/", "_")
-            attempt(label, lambda l=lines, w=wd: engines.eval_lammps(lmp_mliap, atoms, species, w, l,
-                                             engines.MLIAP_KOKKOS_ARGS)[:2],
-                    bool(extra))
 
         if art["package"] and not args.no_package:
             # a packaged model is a deployment route of its own: compile it, then run it
