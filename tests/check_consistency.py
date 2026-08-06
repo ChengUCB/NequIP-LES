@@ -64,6 +64,9 @@ def main():
     ap.add_argument("--backbone", choices=("auto", "nequip", "allegro"), default="auto",
                     help="override the backbone detected from the checkpoint")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--mliap-no-compile", action="store_true",
+                    help="prepare the ML-IAP file with --no-compile (eager); use when its "
+                         "run-time torch.compile fails")
     ap.add_argument("--etol", type=float, default=1e-4, help="eV/atom (default 1e-4)")
     ap.add_argument("--ftol", type=float, default=1e-3, help="eV/A (default 1e-3)")
     args = ap.parse_args()
@@ -124,9 +127,14 @@ def main():
         else:
             print(f"  {name:9s} EXPORT FAILED (see export_{name}.log)")
 
+    # ML-IAP runs the model through torch.compile at LAMMPS run time, unlike every other
+    # path here, which loads an artefact compiled ahead of time. When that run-time
+    # compilation fails, `--no-compile` falls back to eager and still exercises the
+    # interface; the numbers are what we are after, not the speed.
     mliap_file = out / "model.nequip.lmp.pt"
     if shutil.which("nequip-prepare-lmp-mliap") and not mliap_file.exists():
-        cmd = ["nequip-prepare-lmp-mliap", str(ckpt), str(mliap_file)]
+        extra = ["--no-compile"] if args.mliap_no_compile else []
+        cmd = ["nequip-prepare-lmp-mliap", str(ckpt), str(mliap_file), *extra]
         print(f"  {'mliap':9s} $ {' '.join(cmd)}")
         run(cmd, out / "export_mliap.log")
     if mliap_file.exists():

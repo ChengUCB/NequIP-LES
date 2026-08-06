@@ -242,13 +242,24 @@ def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
         for key in [k for k in env if k.startswith(("PMI_", "PMIX_", "SLURM_"))]:
             del env[key]
 
+    # A `run 0` on a few hundred atoms is seconds of work. Anything much longer means it is
+    # stuck rather than busy -- MPI startup is the usual culprit -- so fail instead of hanging.
+    timeout = float(os.environ.get("LMP_TIMEOUT", "300"))
+
     log = workdir / "lmp.log"
     with open(log, "w") as fh:
         cmd = [*launcher, str(lmp), "-in", script.name, *[str(a) for a in extra_args]]
         fh.write("# " + " ".join(cmd) + "\n")
         fh.flush()
-        rc = subprocess.run(cmd, cwd=workdir, stdout=fh, env=env,
-                            stderr=subprocess.STDOUT).returncode
+        try:
+            rc = subprocess.run(cmd, cwd=workdir, stdout=fh, env=env,
+                                stderr=subprocess.STDOUT, timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"lmp still running after {timeout:.0f}s -- see {log}. "
+                f"If it is stuck at startup, try LMP_LAUNCHER='srun -n 1', "
+                f"or raise LMP_TIMEOUT."
+            ) from None
     if rc != 0:
         tail = "\n".join(log.read_text().splitlines()[-6:])
         raise RuntimeError(f"lmp exited {rc}: {tail}")
