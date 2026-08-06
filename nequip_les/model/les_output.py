@@ -9,6 +9,7 @@ from nequip.nn import (
 from nequip.data import AtomicDataDict
 from allegro.nn import EdgewiseReduce
 from ..nn.les import LatentEwaldSum, AddEnergy
+from ..nn._lr_energy_per_atom import DistributeLREnergyPerAtom
 from ..nn.edge_product import EdgeDipoleProduct, EdgeOuterProduct, EdgeSpherical2eProduct
 from ..nn.node_product import NodeOuterProduct, NodeSpherical2eToCartesian, NodeAssembleTensor
 from .. import _keys
@@ -251,6 +252,15 @@ def Add_LES_to_NequIP_model(
     # append LES energy modules after readouts
     model.append("lr_energy_sum", lr_energy_sum)
     model.append("total_energy_sum", total_energy_sum)
+
+    # `total_energy` is complete at this point; this only makes `per_atom_energy` sum to
+    # it, which is what LAMMPS' pair styles read. Set `distribute_lr_energy: false` to
+    # restore the previous behaviour exactly.
+    if les_args is None or les_args.get("distribute_lr_energy", True):
+        model.append(
+            "lr_energy_per_atom",
+            DistributeLREnergyPerAtom(irreps_in=total_energy_sum.irreps_out),
+        )
 
     return model
 
@@ -563,5 +573,14 @@ def Add_LES_to_Allegro_model(
 
     model.append("lr_energy_sum", lr_energy_sum)
     model.append("total_energy_sum", total_energy_sum)
+
+    # `total_energy` is complete at this point; this only makes `per_atom_energy` sum to
+    # it, which is what LAMMPS' pair styles read. Set `distribute_lr_energy: false` to
+    # restore the previous behaviour exactly.
+    if les_args is None or les_args.get("distribute_lr_energy", True):
+        model.append(
+            "lr_energy_per_atom",
+            DistributeLREnergyPerAtom(irreps_in=total_energy_sum.irreps_out),
+        )
 
     return model
