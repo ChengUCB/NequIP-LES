@@ -81,8 +81,13 @@ def main():
 
     ckpt = Path(args.checkpoint).resolve()
     # keyed on the checkpoint: artefacts are named by target only, so a shared directory
-    # would silently hand a different model's exports to the comparison
-    out = Path(args.outdir or Path("consistency_out") / ckpt.stem).resolve()
+    # would silently hand a different model's exports to the comparison. The stem alone is
+    # not enough -- every lightning run produces `epoch=N-step=M.ckpt`, so all models would
+    # collide -- hence the nearest meaningful ancestor directory is included.
+    noise = {"checkpoints", "lightning_logs", "outputs", "ckpt", "run"}
+    tag = next((d for d in reversed(ckpt.parent.parts)
+                if d not in noise and not d.startswith("version_")), "model")
+    out = Path(args.outdir or Path("consistency_out") / f"{tag}_{ckpt.stem}").resolve()
     out.mkdir(parents=True, exist_ok=True)
 
     # and a stamp, in case the same checkpoint path is rewritten by a later training run

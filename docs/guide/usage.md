@@ -3,11 +3,15 @@
 ## Installation
 
 ```bash
-pip install git+https://github.com/ChengUCB/les.git
-pip install git+https://github.com/ChengUCB/NequIP-LES.git
+git clone https://github.com/ChengUCB/les.git
+cd les && pip install -e . && cd ..
+
+git clone https://github.com/ChengUCB/NequIP-LES.git
+cd NequIP-LES && pip install -e .
 ```
 
-Allegro backbones additionally need [allegro](https://github.com/mir-group/allegro).
+Editable installs, so the example configs and the test suite come with them. Allegro backbones
+additionally need [allegro](https://github.com/mir-group/allegro).
 
 ## Turning a NequIP or Allegro config into a LES one
 
@@ -28,6 +32,10 @@ training_module:
         N_max: 10
         sigma: 1.0
         dl: 2.0
+
+    # torch.compile the model for training. Omit it and you get `eager`, which is the
+    # default. Compilation requires `is_periodic` to be set -- see the Ewald page.
+    compile_mode: compile
 
     # everything below is the ordinary backbone config, unchanged
     seed: 123
@@ -61,11 +69,29 @@ one line: `base_model: nequip` or `base_model: allegro`.
 | [`configs/tutorial_les.yaml`](https://github.com/ChengUCB/NequIP-LES/blob/main/configs/tutorial_les.yaml) | minimal LES model (latent charges only) |
 | [`configs/tutorial_les_extension.yaml`](https://github.com/ChengUCB/NequIP-LES/blob/main/configs/tutorial_les_extension.yaml) | dipoles, quadrupoles, polarizabilities |
 | [`configs/tutorial_les_compile.yaml`](https://github.com/ChengUCB/NequIP-LES/blob/main/configs/tutorial_les_compile.yaml) | with train-time compilation |
-| [`configs/test_bec_xyz_callback.yaml`](https://github.com/ChengUCB/NequIP-LES/blob/main/configs/test_bec_xyz_callback.yaml) | writing BECs at test time |
+| [`configs/test_bec_xyz_modifier.yaml`](https://github.com/ChengUCB/NequIP-LES/blob/main/configs/test_bec_xyz_modifier.yaml) | applying a model modifier (`nequip.model.modify`) |
 | [`tests/configs/`](https://github.com/ChengUCB/NequIP-LES/tree/main/tests/configs) | 22 configs covering every backbone / periodicity / Ewald path combination, each complete and copy-able |
 | [extended_les_fit: NequIP water](https://github.com/ChengUCB/extended_les_fit/blob/main/MLIPs/NequIP-LES/water/nequiples-uQiqiu-r-4.5-nl-3-l-1/water-les_uQiqiu_layer3_lmax1.yaml) | a real production config -- bulk water, all multipole and response terms (`uQiqiu`) |
 | [extended_les_fit: Allegro water](https://github.com/ChengUCB/extended_les_fit/tree/main/MLIPs/Allegro-LES/water/allegroles-uQiqiu-r-4.5-nl-3-l-1) | the same with an Allegro backbone |
-| [extended_les_fit](https://github.com/ChengUCB/extended_les_fit/tree/main/MLIPs) | all published fits, and the BEC extraction scripts for each |
+
+## Model modifiers
+
+Accelerations are applied by wrapping the model, not by changing it. The LES block stays where
+it is:
+
+```yaml
+  model:
+    _target_: nequip.model.modify
+    modifiers:
+      - modifier: enable_OpenEquivariance
+    model:
+      _target_: nequip_les.model.LESModel
+      base_model: nequip
+      ...
+```
+
+Which modifiers exist, and where each can be used, is in
+[What works](deployment.md#accelerations).
 
 ## Predicted charges and BECs
 

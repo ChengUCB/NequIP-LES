@@ -9,4 +9,5 @@ Guide
    ewald
    deployment
    lammps
+   troubleshooting
    testing

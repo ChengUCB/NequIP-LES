@@ -6,7 +6,7 @@ choice decides whether the model can be compiled.
 | | legacy (`is_periodic` absent / `None`) | vectorized (`is_periodic: true` or `false`) |
 |---|---|---|
 | boundary condition | decided **per structure**, from `det(cell)` | fixed for the whole model by the flag |
-| mixed periodic + isolated dataset | ✅ | ❌ one condition for everything |
+| mixed periodic + non-periodic dataset | ✅ | ❌ one condition for everything |
 | `torch.compile` (train-time) | ❌ | ✅ |
 | `nequip-compile` (deployment) | ❌ | ✅ |
 | numerical result | same physics | same physics |
@@ -30,7 +30,7 @@ either way.
 
 ## Which should you use
 
-Set `is_periodic` unless your dataset genuinely mixes periodic and isolated structures. It
+Set `is_periodic` unless your dataset genuinely mixes periodic and non-periodic structures. It
 is faster, it is what deployment needs, and stating the boundary condition explicitly is a
 sanity check on your data rather than a cost.
 
@@ -43,13 +43,15 @@ such a dataset into two datasets is usually the better answer.
 `stress = virial / volume`, so a zero cell gives `volume = 0` and the loss becomes NaN as
 soon as the model is compiled -- silently, with training appearing to proceed.
 
-Give isolated structures a large finite cell with `pbc="F F F"`:
+Give non-periodic structures a large finite cell with `pbc="F F F"`:
 
 ```
 Lattice="100.0 0.0 0.0 0.0 100.0 0.0 0.0 0.0 100.0" pbc="F F F"
 ```
 
-The cell is never used physically -- it only keeps the volume finite. Compare
+The cell is never used physically -- it only keeps the volume finite. nequip's
+[`cell_utils`](https://github.com/mir-group/nequip/blob/main/nequip/data/transforms/cell_utils.py)
+is worth reading for how the framework handles cells and periodicity. Compare
 [`tests/data/dipep_train.xyz`](https://github.com/ChengUCB/NequIP-LES/blob/main/tests/data/dipep_train.xyz)
 (zero cell, for eager runs) with
 [`dipep_train_dummycell.xyz`](https://github.com/ChengUCB/NequIP-LES/blob/main/tests/data/dipep_train_dummycell.xyz)
