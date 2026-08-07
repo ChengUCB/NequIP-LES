@@ -23,7 +23,7 @@ carrying LES train, compile and export.
 ## What each script checks
 
 **`run_all.sh` -- training.** 20 configs: both backbones (NequIP, Allegro) × both systems
-(periodic water, isolated dipeptide) × three paths (`compiled`, `eager`, `legacy`), plus 8
+(periodic water, non-periodic dipeptide) × three paths (`compiled`, `eager`, `legacy`), plus 8
 short-range configs with no LES at all. It fails on a NaN anywhere in `metrics.csv`, and it
 verifies that compilation *actually happened*: `*_compiled` rows must report `TRACED` and
 everything else `NOT-TRACED`. That check exists because a config can silently fall back to
