@@ -88,5 +88,6 @@ Both LES and NequIP-LES are licensed under CC BY-NC 4.0.
 
 ## Contact
 
-* NequIP-LES: [issues](https://github.com/ChengUCB/NequIP-LES/issues), or dongjin.kim@berkeley.edu
-* LES itself: tonicbq@gmail.com
+* NequIP-LES: [issues](https://github.com/ChengUCB/NequIP-LES/issues)
+* LES itself: [issues](https://github.com/ChengUCB/les/issues)
+* or dongjin.kim@berkeley.edu

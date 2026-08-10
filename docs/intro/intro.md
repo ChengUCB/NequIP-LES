@@ -17,19 +17,6 @@ differentiating the polarization with respect to atomic positions.
 
 [How LES works](https://les.readthedocs.io/en/latest/theory.html) in the LES documentation goes through this in more detail.
 
-## When you want it
-
-* systems where long-range electrostatics matter: electrolytes, interfaces, charged defects,
-  polar and ionic materials, biomolecules;
-* properties that depend on the charge response: dielectric constants, IR and Raman spectra,
-  BECs, ionic conductivities;
-* cases where the interaction that matters reaches beyond the cutoff: non-local charge
-  transfer, a dopant that changes adsorption from 10 Å away, an interface with an intrinsic
-  field.
-
-LES in general reduces force errors for **every** architecture tested with small computational overhead due to the construction. 
-Please check the previous papers in [].
-
 ## What this package is
 
 [LES](https://github.com/ChengUCB/les) is a standalone library, plugged into a number of

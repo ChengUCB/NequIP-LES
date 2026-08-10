@@ -39,31 +39,23 @@ LAMMPS targets export `per_atom_energy`, `forces` and `virial` -- no `total_ener
 `nequip_les` now spreads the long-range energy across the atoms of each structure so that the
 per-atom array sums to the total. `total_energy`, `forces` and `stress` are bit-for-bit
 unchanged -- the distribution happens *after* the total is formed -- so no trained model changes
-its predictions, and an existing checkpoint only has to be **re-exported**, not retrained. Set
-`distribute_lr_energy: false` in `les_args` to restore the old behaviour.
+its predictions, and an existing checkpoint only has to be **re-exported**, not retrained.
 
 The even split is bookkeeping, not a physical decomposition: a per-atom share of an
 electrostatic energy is not uniquely defined, and only the sum affects what LAMMPS reports.
 
 ## Latent charges are not in a deployed model
 
-`nequip-compile` fixes the outputs per target:
-
-| target | exported outputs |
-|---|---|
-| `pair_nequip`, `pair_allegro` | per-atom energy, forces, virial |
-| `ase`, `batch` | per-atom energy, total energy, forces, stress |
-
-`LES_q` is on neither list, and `LES_BEC` is not even computed unless BEC is switched on. Get
-them during **training or testing** from the checkpoint, with the callbacks in
-[Usage](usage.md#predicted-charges-and-becs).
+`nequip-compile`'s targets export energies, forces and the virial or stress -- not `LES_q`, and
+not `LES_BEC`, which is not even computed unless BEC is switched on. Get them once training has
+finished, from the checkpoint, with the callbacks in
+[Usage](usage.md#predicted-charges-and-becs) for now. 
 
 ## `pair_allegro` and periodic models
 
 That target's graph carries no cell, so a periodic Ewald sum cannot be evaluated and the export
 is refused with an error naming the missing cell. Without the guard the cell was silently filled
-with zeros and the long-range physics quietly became non-periodic
-([issue #15](https://github.com/ChengUCB/NequIP-LES/issues/15)). Use
+with zeros and the long-range physics quietly became non-periodic. Use
 [`--target pair_nequip`](lammps.md#the-lammps-route-for-les-models) instead; `--target ase`
 always passes a cell and is unaffected.
 
@@ -86,8 +78,7 @@ Where each can be used, which those pages also state:
 All four export successfully; the ❌ in the LAMMPS column fail at load with
 `Could not find schema for …`, since their operators are registered from Python.
 
-`nequip-compile` takes its positional arguments first, because `--modifiers` accepts a list and
-would otherwise swallow them:
+`nequip-compile` example for accelerations:
 
 ```bash
 nequip-compile model.ckpt out.nequip.pt2 \

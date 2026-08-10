@@ -60,8 +60,6 @@ one line: `base_model: nequip` or `base_model: allegro`.
 | torch-sim | `--target batch`, then [`NequIPTorchSimCalc`](https://nequip.readthedocs.io/en/latest/integrations/torchsim.html). `pip install torch-sim-atomistic` (python >= 3.11) |
 | LAMMPS | `--target pair_nequip`, one MPI rank -- see [LAMMPS](lammps.md) |
 
-`--target batch` and `--target ase` are not interchangeable; torch-sim needs the batched one.
-
 ## Example configs
 
 | file | what it shows |
