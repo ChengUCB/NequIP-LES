@@ -9,6 +9,8 @@ In particular, `NequIP-LES` implements the [LES library](https://github.com/Chen
 **[nequip-les.readthedocs.io](https://nequip-les.readthedocs.io)** — usage, the `les_args`
 reference, what can and cannot be compiled or deployed, LAMMPS, and the test suite.
 
+For now, please use [`develop_dipole` branch](https://github.com/ChengUCB/les/tree/develop_dipole) of `les` to be fully compatible with `torch.compile`.
+
 ## Installation
 
 ```bash
