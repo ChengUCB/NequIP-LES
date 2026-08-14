@@ -148,6 +148,81 @@ def eval_torchsim(artefact, atoms, device, species):
 PRECISION_CONST = 1.0e6
 
 
+def _place_in_box(atoms):
+    """A copy of `atoms` that LAMMPS' `read_data` will accept.
+
+    It rejects atoms outside the declared box ("Did not assign all atoms correctly"), which is
+    easy to hit: a non-periodic structure carries a dummy cell its coordinates were never
+    fitted into. Both adjustments leave energies and forces untouched -- one wraps into an
+    equivalent periodic image, the other only translates and resizes a box the model ignores.
+    """
+    atoms = atoms.copy()
+    if bool(atoms.pbc.all()):
+        atoms.wrap()
+    else:
+        pos = atoms.positions
+        margin = 10.0
+        atoms.set_cell(np.diag(pos.max(axis=0) - pos.min(axis=0) + 2.0 * margin))
+        atoms.positions = pos - pos.min(axis=0) + margin
+    return atoms
+
+
+def _write_data(workdir, atoms, species):
+    """Write the LAMMPS data file. `specorder` fixes type 1..n to `species`, and every
+    `pair_coeff` line names the same list in the same order -- both come from one variable
+    because a mismatch here is the classic "model runs, forces are nonsense" failure.
+
+    No masses: the ASE keyword's name has changed across versions, and LAMMPS only insists
+    that *some* mass exists, so they are set in the input script instead.
+    """
+    data = Path(workdir) / "data.lmp"
+    write(data, atoms, format="lammps-data", specorder=list(species), atom_style="atomic")
+    return data
+
+
+def _run_lmp(lmp, workdir, script_name, extra_args=(), timeout=None):
+    """Run `lmp` on a script in `workdir` and return (returncode, log path).
+
+    LAMMPS is built against a real MPI (the pair styles require one). Started as a plain
+    subprocess from inside an `srun` step, its MPI_Init sees the outer step's PMI/PMIX
+    variables, aborts on a NULL communicator, and takes the whole SLURM step down. Hiding
+    those variables makes it initialise as an ordinary single-process job instead. Set
+    LMP_LAUNCHER="srun -n 1" to launch it properly instead, in which case the environment is
+    left alone.
+    """
+    launcher = shlex.split(os.environ.get("LMP_LAUNCHER", ""))
+    env = dict(os.environ)
+    if not launcher:
+        for key in [k for k in env if k.startswith(("PMI_", "PMIX_", "SLURM_"))]:
+            del env[key]
+    if timeout is None:
+        timeout = float(os.environ.get("LMP_TIMEOUT", "300"))
+
+    log = Path(workdir) / "lmp.log"
+    with open(log, "w") as fh:
+        cmd = [*launcher, str(lmp), "-in", script_name, *[str(a) for a in extra_args]]
+        fh.write("# " + " ".join(cmd) + "\n")
+        fh.flush()
+        try:
+            rc = subprocess.run(cmd, cwd=workdir, stdout=fh, env=env,
+                                stderr=subprocess.STDOUT, timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"lmp still running after {timeout:.0f}s -- see {log}. If it is stuck at "
+                f"startup, try LMP_LAUNCHER='srun -n 1', or raise LMP_TIMEOUT."
+            ) from None
+    return rc, log
+
+
+def _lmp_error(rc, log):
+    """The real failure line, not LAMMPS' setup chatter."""
+    text = log.read_text().splitlines()
+    hits = [ln.strip() for ln in text
+            if re.search(r"ERROR|Error|Exception|Traceback|error:", ln)]
+    detail = " | ".join(hits[-3:]) if hits else " | ".join(t.strip() for t in text[-3:])
+    return RuntimeError(f"lmp exited {rc}: {detail}  (full log: {log})")
+
+
 def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
                 newton=None, extract=()):
     """Run `lmp` for zero timesteps and read the potential energy and forces back.
@@ -178,30 +253,8 @@ def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
     """
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
-
-    # LAMMPS' read_data rejects atoms that lie outside the declared box
-    # ("Did not assign all atoms correctly"), which is easy to hit: an isolated structure
-    # carries a dummy cell its coordinates were never fitted into. Both adjustments below
-    # leave energies and forces untouched -- one wraps into an equivalent periodic image,
-    # the other only translates and resizes a box the model ignores anyway.
-    atoms = atoms.copy()
-    if bool(atoms.pbc.all()):
-        atoms.wrap()
-    else:
-        pos = atoms.positions
-        margin = 10.0
-        atoms.set_cell(np.diag(pos.max(axis=0) - pos.min(axis=0) + 2.0 * margin))
-        atoms.positions = pos - pos.min(axis=0) + margin
-
-    data = workdir / "data.lmp"
-    # `specorder` fixes LAMMPS type 1..n to `species`, and the pair_coeff line names the
-    # same list in the same order. Both come from one variable because a mismatch here is
-    # the classic "model runs, forces are nonsense" failure.
-    # No masses in the data file: the keyword's name has changed across ASE versions, and
-    # LAMMPS only insists that *some* mass exists. They play no part in a 0-step energy and
-    # force evaluation, so they are set in the input script instead -- which is what
-    # pair_nequip_allegro's own repro tests do.
-    write(data, atoms, format="lammps-data", specorder=list(species), atom_style="atomic")
+    atoms = _place_in_box(atoms)
+    data = _write_data(workdir, atoms, species)
 
     style = "allegro" if "pair_style      allegro" in pair_lines else "nequip"
     if newton is None:
@@ -241,44 +294,9 @@ def eval_lammps(lmp, atoms, species, workdir, pair_lines, extra_args=(),
     script = workdir / "in.check"
     script.write_text("\n".join(lines) + "\n")
 
-    # LAMMPS is built against a real MPI (the pair styles require one). Started as a plain
-    # subprocess from inside an `srun` step, its MPI_Init sees the outer step's PMI/PMIX
-    # variables, aborts on a NULL communicator, and takes the whole SLURM step down. Hiding
-    # those variables makes it initialise as an ordinary single-process job instead.
-    # Set LMP_LAUNCHER="srun -n 1" to launch it properly instead, in which case the
-    # environment is left alone.
-    launcher = shlex.split(os.environ.get("LMP_LAUNCHER", ""))
-    env = dict(os.environ)
-    if not launcher:
-        for key in [k for k in env if k.startswith(("PMI_", "PMIX_", "SLURM_"))]:
-            del env[key]
-
-    # A `run 0` on a few hundred atoms is seconds of work. Anything much longer means it is
-    # stuck rather than busy -- MPI startup is the usual culprit -- so fail instead of hanging.
-    timeout = float(os.environ.get("LMP_TIMEOUT", "300"))
-
-    log = workdir / "lmp.log"
-    with open(log, "w") as fh:
-        cmd = [*launcher, str(lmp), "-in", script.name, *[str(a) for a in extra_args]]
-        fh.write("# " + " ".join(cmd) + "\n")
-        fh.flush()
-        try:
-            rc = subprocess.run(cmd, cwd=workdir, stdout=fh, env=env,
-                                stderr=subprocess.STDOUT, timeout=timeout).returncode
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(
-                f"lmp still running after {timeout:.0f}s -- see {log}. "
-                f"If it is stuck at startup, try LMP_LAUNCHER='srun -n 1', "
-                f"or raise LMP_TIMEOUT."
-            ) from None
+    rc, log = _run_lmp(lmp, workdir, script.name, extra_args)
     if rc != 0:
-        # the last few lines are usually LAMMPS' setup chatter, not the failure; pick out the
-        # lines that actually say something went wrong, and fall back to the tail
-        text = log.read_text().splitlines()
-        hits = [ln.strip() for ln in text
-                if re.search(r"ERROR|Error|Exception|Traceback|error:", ln)]
-        detail = " | ".join(hits[-3:]) if hits else " | ".join(t.strip() for t in text[-3:])
-        raise RuntimeError(f"lmp exited {rc}: {detail}  (full log: {log})")
+        raise _lmp_error(rc, log)
 
     pe_file = workdir / "pe.dat"
     if not pe_file.exists():
@@ -308,3 +326,65 @@ def lammps_pair_lines(artefact, species, allegro):
     return (f"pair_style      {style}\n"
             f"pair_coeff      * * {artefact} {' '.join(species)}")
 
+
+# ---------------------------------------------------------------- MD timing ----
+# only what the water/dipeptide systems need; anything else falls back to 1.0, which is
+# fine for a single-point evaluation but would change an NVE trajectory
+_MASSES = {"H": 1.008, "C": 12.011, "N": 14.007, "O": 15.999}
+
+def time_lammps_md(lmp, atoms, species, workdir, pair_lines, steps=100, warmup=100,
+                   timestep_fs=1.0, temperature_K=300.0, seed=12345,
+                   extra_args=(), newton=None, timeout=None):
+    """Time `steps` NVE steps in LAMMPS and return (loop_seconds, steps, natoms).
+
+    Timed with LAMMPS' own `Loop time`, taken from a **second** `run` after a warmup `run`.
+    That number already excludes setup, the first neighbour build and the model load, which is
+    what makes it comparable to a Python-side measurement that brackets a warmed-up loop.
+
+    The neighbour list is rebuilt every step (`delay 0 every 1 check no`) to match what the
+    ASE path does, since its calculator rebuilds the list on every call.
+    """
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    atoms = _place_in_box(atoms)
+    data = _write_data(workdir, atoms, species)
+
+    if newton is None:
+        newton = "off" if "pair_style      nequip" in pair_lines else "on"
+
+    lines = [
+        "units           metal",
+        "atom_style      atomic",
+        f"boundary        {'p p p' if bool(atoms.pbc.all()) else 's s s'}",
+        "atom_modify     map yes",
+        f"newton          {newton}",
+        f"read_data       {data.name}",
+        pair_lines,
+        # real masses matter here: an NVE trajectory depends on them
+        *[f"mass            {i + 1} {_MASSES.get(sp, 1.0)}" for i, sp in enumerate(species)],
+        "neighbor        1.0 bin",
+        "neigh_modify    delay 0 every 1 check no",
+        f"velocity        all create {temperature_K} {seed} mom yes rot yes dist gaussian",
+        "fix             1 all nve",
+        f"timestep        {timestep_fs / 1000.0}",
+        "thermo          0",
+        f"run             {warmup}",     # warm-up: not timed
+        "reset_timestep  0",
+        f"run             {steps}",      # the timed segment; its Loop time is what we read
+    ]
+    script = workdir / "in.timing"
+    script.write_text("\n".join(lines) + "\n")
+
+    rc, log = _run_lmp(lmp, workdir, script.name, extra_args, timeout=timeout)
+    if rc != 0:
+        raise _lmp_error(rc, log)
+
+    # "Loop time of 12.34 on 1 procs for 100 steps with 1536 atoms" -- take the LAST one,
+    # which belongs to the timed run rather than the warm-up
+    hits = re.findall(
+        r"Loop time of ([0-9.eE+-]+) on \d+ procs for (\d+) steps with (\d+) atoms",
+        log.read_text())
+    if not hits:
+        raise RuntimeError(f"no 'Loop time' in {log}")
+    wall, nsteps, natoms = hits[-1]
+    return float(wall), int(nsteps), int(natoms)
